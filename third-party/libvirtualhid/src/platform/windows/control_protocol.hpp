@@ -1,0 +1,342 @@
+/**
+ * @file src/platform/windows/control_protocol.hpp
+ * @brief C++ helpers for the Windows UMDF control protocol.
+ */
+#pragma once
+
+// standard includes
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iterator>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+// driver includes
+#include "generic_pid_protocol.hpp"
+#include "lvh_windows_protocol.h"
+#include "xbox_360_protocol.hpp"
+
+// local includes
+#include <libvirtualhid/profiles.hpp>
+#include <libvirtualhid/report.hpp>
+#include <libvirtualhid/types.hpp>
+
+namespace lvh::detail::windows {
+
+  inline constexpr std::string_view default_control_device_path {LVH_WINDOWS_CONTROL_DEVICE_PATH};
+  inline constexpr std::string_view global_control_device_path {LVH_WINDOWS_GLOBAL_CONTROL_DEVICE_PATH};
+  inline constexpr std::uint16_t xbox_series_windows_product_id = 0x0B12;
+  inline constexpr std::uint16_t xbox_series_windows_device_version = 0x0509;
+  inline constexpr std::size_t xbox_series_windows_input_report_size = 17;
+  inline constexpr std::size_t xbox_series_windows_output_report_size = 8;
+  inline constexpr LvhWindowsSessionToken empty_session_token {};
+
+  inline std::uint32_t gamepad_flags(const GamepadProfileCapabilities &capabilities) {
+    std::uint32_t flags = 0;
+    if (capabilities.supports_rumble) {
+      flags |= LVH_WINDOWS_GAMEPAD_FLAG_SUPPORTS_RUMBLE;
+    }
+    if (capabilities.supports_motion) {
+      flags |= LVH_WINDOWS_GAMEPAD_FLAG_SUPPORTS_MOTION;
+    }
+    if (capabilities.supports_touchpad) {
+      flags |= LVH_WINDOWS_GAMEPAD_FLAG_SUPPORTS_TOUCHPAD;
+    }
+    if (capabilities.supports_rgb_led) {
+      flags |= LVH_WINDOWS_GAMEPAD_FLAG_SUPPORTS_RGB_LED;
+    }
+    if (capabilities.supports_battery) {
+      flags |= LVH_WINDOWS_GAMEPAD_FLAG_SUPPORTS_BATTERY;
+    }
+    if (capabilities.supports_adaptive_triggers) {
+      flags |= LVH_WINDOWS_GAMEPAD_FLAG_SUPPORTS_ADAPTIVE_TRIGGERS;
+    }
+
+    return flags;
+  }
+
+  inline std::uint32_t protocol_bus_type(BusType bus_type) {
+    switch (bus_type) {
+      using enum BusType;
+
+      case usb:
+        return LVH_WINDOWS_BUS_USB;
+      case bluetooth:
+        return LVH_WINDOWS_BUS_BLUETOOTH;
+      case unknown:
+        return LVH_WINDOWS_BUS_UNKNOWN;
+    }
+
+    return LVH_WINDOWS_BUS_UNKNOWN;
+  }
+
+  inline std::uint32_t protocol_device_type(DeviceType device_type) {
+    switch (device_type) {
+      using enum DeviceType;
+
+      case gamepad:
+        return LVH_WINDOWS_DEVICE_GAMEPAD;
+      case keyboard:
+        return LVH_WINDOWS_DEVICE_KEYBOARD;
+      case mouse:
+        return LVH_WINDOWS_DEVICE_MOUSE;
+      case touchscreen:
+      case trackpad:
+      case pen_tablet:
+        break;
+    }
+
+    return 0U;
+  }
+
+  inline std::uint32_t protocol_gamepad_kind(GamepadProfileKind kind) {
+    switch (kind) {
+      using enum GamepadProfileKind;
+
+      case generic:
+        return LVH_WINDOWS_GAMEPAD_GENERIC;
+      case xbox_360:
+        return LVH_WINDOWS_GAMEPAD_XBOX_360;
+      case xbox_one:
+        return LVH_WINDOWS_GAMEPAD_XBOX_ONE;
+      case xbox_series:
+        return LVH_WINDOWS_GAMEPAD_XBOX_SERIES;
+      case dualshock4:
+        return LVH_WINDOWS_GAMEPAD_DUALSHOCK4;
+      case dualsense:
+        return LVH_WINDOWS_GAMEPAD_DUALSENSE;
+      case switch_pro:
+        return LVH_WINDOWS_GAMEPAD_SWITCH_PRO;
+    }
+
+    return LVH_WINDOWS_GAMEPAD_GENERIC;
+  }
+
+  inline DeviceProfile effective_vhf_gamepad_profile(const DeviceProfile &requested_profile) {
+    if (requested_profile.bus_type != BusType::bluetooth) {
+      return requested_profile;
+    }
+
+    auto usb_profile = DeviceProfile {};
+    switch (requested_profile.gamepad_kind) {
+      case GamepadProfileKind::dualshock4:
+        usb_profile = profiles::dualshock4_usb();
+        break;
+      case GamepadProfileKind::dualsense:
+        usb_profile = profiles::dualsense_usb();
+        break;
+      default:
+        return requested_profile;
+    }
+
+    auto effective_profile = requested_profile;
+    effective_profile.bus_type = usb_profile.bus_type;
+    effective_profile.report_id = usb_profile.report_id;
+    effective_profile.input_report_size = usb_profile.input_report_size;
+    effective_profile.output_report_size = usb_profile.output_report_size;
+    effective_profile.report_descriptor = std::move(usb_profile.report_descriptor);
+    return effective_profile;
+  }
+
+  template<std::size_t Size>
+  std::uint32_t copy_string(std::array<char, Size> &target, std::string_view source) {
+    std::ranges::fill(target, '\0');
+
+    const auto copied = std::min(source.size(), Size - 1U);
+    if (copied > 0U) {
+      std::memcpy(target.data(), source.data(), copied);
+    }
+
+    return static_cast<std::uint32_t>(copied);
+  }
+
+  template<std::size_t Size>
+  std::uint32_t copy_bytes(std::array<std::uint8_t, Size> &target, const std::vector<std::uint8_t> &source) {
+    std::ranges::fill(target, std::uint8_t {});
+
+    const auto copied = std::min(source.size(), Size);
+    if (copied > 0U) {
+      std::memcpy(target.data(), source.data(), copied);
+    }
+
+    return static_cast<std::uint32_t>(copied);
+  }
+
+  inline LvhWindowsCreateDeviceRequest make_create_device_request(
+    DeviceId device_id,
+    const DeviceProfile &profile,
+    std::string_view stable_id
+  ) {
+    auto report_descriptor = profile.report_descriptor;
+    auto input_report_size = profile.input_report_size;
+    auto output_report_size = profile.output_report_size;
+    auto bus_type = profile.bus_type;
+    auto product_id = profile.product_id;
+    auto device_version = profile.version;
+    auto report_id = profile.report_id;
+    if (
+      profile.device_type == DeviceType::gamepad &&
+      profile.gamepad_kind == GamepadProfileKind::generic &&
+      profile.capabilities.supports_rumble
+    ) {
+      auto pid_descriptor = make_generic_pid_report_descriptor(report_descriptor);
+      if (!pid_descriptor.empty()) {
+        report_descriptor = std::move(pid_descriptor);
+        output_report_size = generic_pid_output_report_size;
+      }
+    }
+    if (profile.device_type == DeviceType::gamepad && profile.gamepad_kind == GamepadProfileKind::xbox_series) {
+      input_report_size = xbox_series_windows_input_report_size;
+      output_report_size = xbox_series_windows_output_report_size;
+      product_id = xbox_series_windows_product_id;
+      device_version = xbox_series_windows_device_version;
+    }
+    LvhWindowsCreateDeviceRequest request {};
+    request.version = LVH_WINDOWS_CONTROL_PROTOCOL_VERSION;
+    request.size = sizeof(request);
+    request.client_device_id = device_id;
+    request.device_type = protocol_device_type(profile.device_type);
+    request.bus_type = protocol_bus_type(bus_type);
+    request.gamepad_kind = protocol_gamepad_kind(profile.gamepad_kind);
+    request.flags = profile.device_type == DeviceType::gamepad ? gamepad_flags(profile.capabilities) : 0U;
+    request.hardware_ids.vendor_id = profile.vendor_id;
+    request.hardware_ids.product_id = product_id;
+    request.hardware_ids.device_version = device_version;
+    request.hardware_ids.report_id = report_id;
+    request.report_sizes.input_report_size = static_cast<std::uint32_t>(
+      std::min(input_report_size, static_cast<std::size_t>(LVH_WINDOWS_MAX_INPUT_REPORT_SIZE))
+    );
+    request.report_sizes.output_report_size = static_cast<std::uint32_t>(
+      std::min(output_report_size, static_cast<std::size_t>(LVH_WINDOWS_MAX_OUTPUT_REPORT_SIZE))
+    );
+    request.report_sizes.report_descriptor_size =
+      copy_bytes(request.report_descriptor, report_descriptor);
+    request.report_sizes.name_size = copy_string(request.name, profile.name);
+    request.report_sizes.manufacturer_size = copy_string(request.manufacturer, profile.manufacturer);
+    request.report_sizes.stable_id_size = copy_string(request.stable_id, stable_id);
+
+    return request;
+  }
+
+  inline LvhWindowsCreateDeviceRequest make_create_device_request(
+    DeviceId device_id,
+    const CreateGamepadOptions &options
+  ) {
+    return make_create_device_request(device_id, options.profile, options.metadata.stable_id);
+  }
+
+  inline LvhWindowsCreateDeviceRequest make_create_device_request(
+    DeviceId device_id,
+    const CreateKeyboardOptions &options
+  ) {
+    return make_create_device_request(device_id, options.profile, options.stable_id);
+  }
+
+  inline LvhWindowsCreateDeviceRequest make_create_device_request(
+    DeviceId device_id,
+    const CreateMouseOptions &options
+  ) {
+    return make_create_device_request(device_id, options.profile, options.stable_id);
+  }
+
+  inline LvhWindowsDestroyDeviceRequest make_destroy_device_request(
+    std::uint64_t driver_device_id,
+    const LvhWindowsSessionToken &session_token
+  ) {
+    LvhWindowsDestroyDeviceRequest request {};
+    request.version = LVH_WINDOWS_CONTROL_PROTOCOL_VERSION;
+    request.size = sizeof(request);
+    request.driver_device_id = driver_device_id;
+    request.session_token = session_token;
+
+    return request;
+  }
+
+  inline LvhWindowsDestroyDeviceRequest make_destroy_device_request(std::uint64_t driver_device_id) {
+    return make_destroy_device_request(driver_device_id, empty_session_token);
+  }
+
+  inline LvhWindowsResetDevicesRequest make_reset_devices_request() {
+    LvhWindowsResetDevicesRequest request {};
+    request.version = LVH_WINDOWS_CONTROL_PROTOCOL_VERSION;
+    request.size = sizeof(request);
+    return request;
+  }
+
+  inline LvhWindowsSubmitInputReportRequest make_submit_input_report_request(
+    std::uint64_t driver_device_id,
+    const LvhWindowsSessionToken &session_token,
+    const std::vector<std::uint8_t> &report
+  ) {
+    LvhWindowsSubmitInputReportRequest request {};
+    request.version = LVH_WINDOWS_CONTROL_PROTOCOL_VERSION;
+    request.size = sizeof(request);
+    request.driver_device_id = driver_device_id;
+    request.session_token = session_token;
+    request.report_size = copy_bytes(request.report, report);
+
+    return request;
+  }
+
+  inline LvhWindowsSubmitInputReportRequest make_submit_input_report_request(
+    std::uint64_t driver_device_id,
+    const std::vector<std::uint8_t> &report
+  ) {
+    return make_submit_input_report_request(driver_device_id, empty_session_token, report);
+  }
+
+  inline std::uint16_t xbox_360_button_bits(const ButtonSet &buttons) {
+    using enum GamepadButton;
+
+    auto result = std::uint16_t {};
+    const auto add = [&](GamepadButton button, std::uint16_t flag) {
+      if (buttons.test(button)) {
+        result = static_cast<std::uint16_t>(result | flag);
+      }
+    };
+
+    add(dpad_up, LVH_WINDOWS_XINPUT_DPAD_UP);
+    add(dpad_down, LVH_WINDOWS_XINPUT_DPAD_DOWN);
+    add(dpad_left, LVH_WINDOWS_XINPUT_DPAD_LEFT);
+    add(dpad_right, LVH_WINDOWS_XINPUT_DPAD_RIGHT);
+    add(start, LVH_WINDOWS_XINPUT_START);
+    add(back, LVH_WINDOWS_XINPUT_BACK);
+    add(left_stick, LVH_WINDOWS_XINPUT_LEFT_THUMB);
+    add(right_stick, LVH_WINDOWS_XINPUT_RIGHT_THUMB);
+    add(left_shoulder, LVH_WINDOWS_XINPUT_LEFT_SHOULDER);
+    add(right_shoulder, LVH_WINDOWS_XINPUT_RIGHT_SHOULDER);
+    add(guide, LVH_WINDOWS_XINPUT_GUIDE);
+    add(a, LVH_WINDOWS_XINPUT_A);
+    add(b, LVH_WINDOWS_XINPUT_B);
+    add(x, LVH_WINDOWS_XINPUT_X);
+    add(y, LVH_WINDOWS_XINPUT_Y);
+    return result;
+  }
+
+  inline LvhWindowsXbox360SubmitInputRequest make_xbox_360_submit_input_request(
+    std::uint64_t driver_device_id,
+    const LvhWindowsSessionToken &session_token,
+    const GamepadState &state
+  ) {
+    const auto normalized = reports::normalize_state(state);
+    LvhWindowsXbox360SubmitInputRequest request {};
+    request.version = LVH_WINDOWS_XBOX360_PROTOCOL_VERSION;
+    request.size = sizeof(request);
+    request.driver_device_id = driver_device_id;
+    request.session_token = session_token;
+    request.state.buttons = xbox_360_button_bits(normalized.buttons);
+    request.state.left_trigger = reports::normalize_trigger(normalized.left_trigger);
+    request.state.right_trigger = reports::normalize_trigger(normalized.right_trigger);
+    request.state.left_thumb_x = reports::normalize_axis(normalized.left_stick.x);
+    request.state.left_thumb_y = reports::normalize_axis(normalized.left_stick.y);
+    request.state.right_thumb_x = reports::normalize_axis(normalized.right_stick.x);
+    request.state.right_thumb_y = reports::normalize_axis(normalized.right_stick.y);
+    return request;
+  }
+
+}  // namespace lvh::detail::windows

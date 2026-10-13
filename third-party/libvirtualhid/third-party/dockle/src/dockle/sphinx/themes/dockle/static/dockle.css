@@ -1,0 +1,2593 @@
+/*
+ * Dockle's shared visual layer.
+ *
+ * The design follows Furo's content-first principles without copying its
+ * templates: restrained chrome, readable measures, responsive sidebars, and
+ * automatic light/dark palettes. Framework sections below map those tokens to
+ * each generator's stable HTML landmarks.
+ */
+
+:root {
+  color-scheme: light dark;
+  --dockle-background-secondary: color-mix(in srgb, var(--dockle-background) 94%, var(--dockle-content));
+  --dockle-border: color-mix(in srgb, var(--dockle-content) 18%, transparent);
+  --dockle-code-background: color-mix(in srgb, var(--dockle-background) 92%, var(--dockle-content));
+  --dockle-code-comment: #64748b;
+  --dockle-code-keyword: #7c3aed;
+  --dockle-code-name: #0369a1;
+  --dockle-code-number: #b45309;
+  --dockle-code-operator: #be123c;
+  --dockle-code-string: #15803d;
+  --dockle-muted: color-mix(in srgb, var(--dockle-content) 68%, transparent);
+  --dockle-sidebar-padding: 1.25rem;
+  --dockle-sidebar-width: 18rem;
+  --dockle-sidebar-header-height: 8.5rem;
+  --dockle-sidebar-toolbar-top: 4.75rem;
+  --dockle-sidebar-logo-size: 2rem;
+  --dockle-content-width: 52rem;
+  --dockle-content-gutter: clamp(1.25rem, 4vw, 4rem);
+  --dockle-column-gap: clamp(1.5rem, 4vw, 4rem);
+  --dockle-page-toc-width: 14rem;
+  --dockle-radius: 0.35rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) {
+    --dockle-content: #e5e7eb;
+    --dockle-background-secondary: color-mix(in srgb, var(--dockle-background) 88%, white);
+    --dockle-border: color-mix(in srgb, var(--dockle-content) 22%, transparent);
+    --dockle-code-background: color-mix(in srgb, var(--dockle-background) 82%, white);
+    --dockle-code-comment: #94a3b8;
+    --dockle-code-keyword: #c084fc;
+    --dockle-code-name: #38bdf8;
+    --dockle-code-number: #fbbf24;
+    --dockle-code-operator: #fb7185;
+    --dockle-code-string: #a3e635;
+    --dockle-muted: color-mix(in srgb, var(--dockle-content) 72%, transparent);
+  }
+}
+
+:root[data-color-scheme="dark"] {
+  --dockle-content: #e5e7eb;
+  --dockle-background-secondary: color-mix(in srgb, var(--dockle-background) 88%, white);
+  --dockle-border: color-mix(in srgb, var(--dockle-content) 22%, transparent);
+  --dockle-code-background: color-mix(in srgb, var(--dockle-background) 82%, white);
+  --dockle-code-comment: #94a3b8;
+  --dockle-code-keyword: #c084fc;
+  --dockle-code-name: #38bdf8;
+  --dockle-code-number: #fbbf24;
+  --dockle-code-operator: #fb7185;
+  --dockle-code-string: #a3e635;
+  --dockle-muted: color-mix(in srgb, var(--dockle-content) 72%, transparent);
+}
+
+html {
+  background: var(--dockle-background);
+  box-sizing: border-box;
+  font-family: var(--dockle-font);
+  font-size: 16px;
+  line-height: 1.6;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: inherit;
+}
+
+body {
+  background: var(--dockle-background);
+  color: var(--dockle-content);
+  font-family: var(--dockle-font);
+  font-size: 1rem;
+  margin: 0;
+}
+
+.lucide {
+  display: block;
+  height: 1em;
+  pointer-events: none;
+  width: 1em;
+}
+
+[data-lucide] {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+a,
+a:visited {
+  color: var(--dockle-primary);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.16em;
+}
+
+a:hover {
+  text-decoration-thickness: 0.14em;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--dockle-content);
+  font-family: var(--dockle-font);
+  font-weight: 650;
+  line-height: 1.25;
+  position: relative;
+  scroll-margin-top: 1rem;
+}
+
+h1 {
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  letter-spacing: -0.025em;
+}
+
+h2 {
+  border-bottom: 1px solid var(--dockle-border);
+  font-size: 1.65rem;
+  padding-bottom: 0.35rem;
+}
+
+.headerlink {
+  font-size: 0.65em;
+  margin-left: 0.2em;
+  position: absolute;
+  text-decoration: none;
+  visibility: hidden;
+}
+
+h1:hover > .headerlink,
+h2:hover > .headerlink,
+h3:hover > .headerlink,
+h4:hover > .headerlink,
+h5:hover > .headerlink,
+h6:hover > .headerlink,
+.headerlink:focus-visible {
+  visibility: visible;
+}
+
+.dockle-heading-anchor {
+  align-items: center;
+  background: transparent;
+  border-radius: 0.25rem;
+  color: var(--dockle-muted) !important;
+  display: inline-flex;
+  font-size: 0.65em;
+  line-height: 1;
+  margin-left: 0.3em;
+  opacity: 0;
+  padding: 0.15em;
+  position: absolute;
+  text-decoration: none !important;
+  transform: translateY(0.08em);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+  visibility: hidden;
+}
+
+:where(h1, h2, h3, h4, h5, h6):hover > .dockle-heading-anchor,
+:where(h1, h2, h3, h4, h5, h6):focus-within > .dockle-heading-anchor {
+  opacity: 0.72;
+  visibility: visible;
+}
+
+.dockle-heading-anchor:hover,
+.dockle-heading-anchor:focus-visible {
+  background: var(--dockle-background-secondary);
+  color: var(--dockle-primary) !important;
+  opacity: 1;
+  visibility: visible;
+}
+
+.dockle-heading-anchor:focus-visible {
+  outline: 2px solid var(--dockle-primary);
+  outline-offset: 2px;
+}
+
+.dockle-heading-anchor .lucide {
+  height: 1em;
+  width: 1em;
+}
+
+@keyframes dockle-anchor-highlight {
+  0%,
+  35% {
+    background-color: color-mix(in srgb, var(--dockle-primary) 14%, transparent);
+    box-shadow: -0.3rem 0 0 var(--dockle-primary);
+  }
+
+  100% {
+    background-color: color-mix(in srgb, var(--dockle-primary) 4%, transparent);
+    box-shadow: -0.3rem 0 0 color-mix(
+      in srgb,
+      var(--dockle-primary) 62%,
+      transparent
+    );
+  }
+}
+
+.dockle-anchor-highlight {
+  animation: dockle-anchor-highlight 650ms ease-out;
+  background-color: color-mix(in srgb, var(--dockle-primary) 4%, transparent);
+  box-shadow: -0.3rem 0 0 color-mix(
+    in srgb,
+    var(--dockle-primary) 62%,
+    transparent
+  );
+}
+
+@media (hover: none) {
+  .dockle-heading-anchor {
+    opacity: 0.72;
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dockle-anchor-highlight {
+    animation: none;
+  }
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--dockle-code-font);
+}
+
+code {
+  background: var(--dockle-code-background);
+  border-radius: 0.2rem;
+  color: var(--dockle-content);
+  padding: 0.12em 0.28em;
+}
+
+pre,
+div.fragment,
+.highlight,
+.source {
+  background: var(--dockle-code-background) !important;
+  border: 1px solid var(--dockle-border) !important;
+  border-radius: var(--dockle-radius);
+  box-shadow: none !important;
+  font-size: 1rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  padding: 1rem;
+}
+
+.dockle-article img,
+html[data-dockle-framework="doxygen"] #doc-content .contents img {
+  height: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+html[data-dockle-framework="doxygen"] span.tt {
+  background: var(--dockle-code-background) !important;
+  border-radius: 0.2rem;
+  color: var(--dockle-content) !important;
+  font-family: var(--dockle-code-font);
+  padding: 0.12em 0.28em;
+}
+
+pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.highlight {
+  padding: 0;
+}
+
+.highlight pre {
+  border: 0 !important;
+  margin: 0;
+}
+
+/* Normalize each generator's native syntax tokens to one shared palette. */
+:where(.highlight, .codehilite) :is(.c, .ch, .cm, .cp, .cpf, .c1, .cs),
+.hljs :is(.hljs-comment, .hljs-quote),
+html[data-dockle-framework="jsdoc"] pre.prettyprint .com,
+html[data-dockle-framework="rustdoc"] pre :is(.comment, .doccomment) {
+  color: var(--dockle-code-comment) !important;
+}
+
+:where(.highlight, .codehilite) :is(.k, .kc, .kd, .kn, .kp, .kr, .kt),
+.hljs
+  :is(
+    .hljs-keyword,
+    .hljs-literal,
+    .hljs-section,
+    .hljs-selector-tag,
+    .hljs-link
+  ),
+html[data-dockle-framework="jsdoc"] pre.prettyprint :is(.kwd, .typ),
+html[data-dockle-framework="rustdoc"] pre :is(.kw, .kw-2, .self-val) {
+  color: var(--dockle-code-keyword) !important;
+}
+
+:where(.highlight, .codehilite) :is(.nb, .nc, .nd, .ne, .nf, .nl, .nn, .nt),
+.hljs
+  :is(
+    .hljs-attribute,
+    .hljs-built_in,
+    .hljs-bullet,
+    .hljs-name,
+    .hljs-symbol,
+    .hljs-title,
+    .hljs-type,
+    .hljs-variable,
+    .hljs-template-tag,
+    .hljs-template-variable,
+    .hljs-addition
+  ),
+html[data-dockle-framework="jsdoc"] pre.prettyprint :is(.atn, .tag),
+html[data-dockle-framework="rustdoc"] pre :is(.macro, .prelude-ty, .prelude-val, .primitive) {
+  color: var(--dockle-code-name) !important;
+}
+
+:where(.highlight, .codehilite) :is(.m, .mb, .mf, .mh, .mi, .mo, .il),
+.hljs :is(.hljs-number, .hljs-meta),
+html[data-dockle-framework="jsdoc"] pre.prettyprint .lit,
+html[data-dockle-framework="rustdoc"] pre :is(.bool-val, .number) {
+  color: var(--dockle-code-number) !important;
+}
+
+:where(.highlight, .codehilite) :is(.o, .ow),
+html[data-dockle-framework="rustdoc"] pre :is(.lifetime, .question-mark) {
+  color: var(--dockle-code-operator) !important;
+}
+
+:where(.highlight, .codehilite)
+  :is(.s, .sa, .sb, .sc, .dl, .sd, .s1, .s2, .se, .sh, .si, .sr, .ss, .sx),
+.hljs :is(.hljs-string, .hljs-regexp, .hljs-deletion),
+html[data-dockle-framework="jsdoc"] pre.prettyprint :is(.atv, .str),
+html[data-dockle-framework="rustdoc"] pre :is(.string, .string-2) {
+  color: var(--dockle-code-string) !important;
+}
+
+.hljs {
+  background: transparent !important;
+  color: inherit;
+}
+
+div.fragment > code.hljs {
+  display: block;
+  padding: 0;
+  white-space: pre;
+}
+
+.dockle-language-gallery {
+  margin: 1rem 0;
+}
+
+.dockle-language-gallery-controls {
+  align-items: end;
+  display: grid;
+  gap: 0.4rem 1rem;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  margin-bottom: 1rem;
+}
+
+.dockle-language-gallery-label {
+  color: var(--dockle-content);
+  font-weight: 600;
+  grid-column: 1 / -1;
+}
+
+.dockle-language-gallery-filter {
+  background: var(--dockle-background-secondary);
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  color: var(--dockle-content);
+  font: inherit;
+  min-width: 0;
+  padding: 0.65rem 0.8rem;
+}
+
+.dockle-language-gallery-filter:focus-visible {
+  border-color: var(--dockle-primary);
+  outline: 2px solid color-mix(in srgb, var(--dockle-primary) 25%, transparent);
+  outline-offset: 1px;
+}
+
+.dockle-language-gallery-count {
+  color: var(--dockle-muted);
+  white-space: nowrap;
+}
+
+.dockle-language-gallery-list {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dockle-language-gallery-item {
+  min-width: 0;
+}
+
+.dockle-language-gallery-item[hidden] {
+  display: none;
+}
+
+.dockle-language-gallery-end {
+  display: none;
+}
+
+.dockle-language-gallery-header {
+  align-items: baseline;
+  border: 0;
+  color: var(--dockle-content);
+  display: flex;
+  font-family: var(--dockle-font);
+  font-size: 1rem;
+  font-weight: 600;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  line-height: 1.5;
+  margin: 0 0 0.35rem;
+  padding: 0;
+}
+
+.dockle-language-gallery-header > span {
+  color: var(--dockle-muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.dockle-language-gallery-item pre {
+  margin: 0;
+}
+
+.dockle-language-toc {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding-left: 0.75rem !important;
+}
+
+.dockle-language-toc > li {
+  line-height: 1.35;
+  margin: 0.4rem 0;
+}
+
+@media (max-width: 32rem) {
+  .dockle-language-gallery-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .dockle-language-gallery-count {
+    white-space: normal;
+  }
+}
+
+.dockle-code-block {
+  margin: 1rem 0 1.5rem;
+  position: relative;
+}
+
+.dockle-code-block > pre {
+  margin-bottom: 0;
+  margin-top: 0;
+  padding-right: 3.25rem;
+}
+
+div.fragment.dockle-code-block {
+  padding-right: 3.25rem;
+}
+
+.dockle-tab-panel > .dockle-code-block:first-child,
+td > .dockle-code-block {
+  margin-top: 0;
+}
+
+.dockle-tab-panel > .dockle-code-block:last-child,
+td > .dockle-code-block {
+  margin-bottom: 0;
+}
+
+.dockle-copy-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--dockle-background-secondary) 88%, transparent);
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  color: var(--dockle-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  height: 2rem;
+  justify-content: center;
+  opacity: 0.8;
+  padding: 0;
+  position: absolute;
+  right: 0.55rem;
+  top: 0.55rem;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+  width: 2rem;
+  z-index: 4;
+}
+
+.dockle-copy-button:hover,
+.dockle-copy-button:focus-visible {
+  background: var(--dockle-background-secondary) !important;
+  color: var(--dockle-primary) !important;
+  opacity: 1 !important;
+}
+
+.dockle-copy-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--dockle-primary) 35%, transparent);
+  outline-offset: 1px;
+}
+
+blockquote {
+  background: var(--dockle-background-secondary) !important;
+  border-left: 0.25rem solid var(--dockle-primary);
+  color: var(--dockle-content) !important;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+}
+
+blockquote > :first-child {
+  margin-top: 0;
+}
+
+blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+table {
+  border-collapse: collapse;
+  display: block;
+  margin: 1rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+th,
+td {
+  border: 1px solid var(--dockle-border) !important;
+  padding: 0.55rem 0.8rem !important;
+  text-align: left;
+}
+
+th {
+  background: var(--dockle-background-secondary) !important;
+  color: var(--dockle-content) !important;
+}
+
+.dockle-alias-table {
+  display: table;
+  margin: 0;
+  width: 100%;
+}
+
+.sig-object {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  display: block;
+  font-family: var(--dockle-code-font);
+  overflow-wrap: anywhere;
+  padding: 0;
+}
+
+.sig-object .property {
+  color: var(--dockle-code-keyword);
+}
+
+.sig-object .sig-name {
+  color: var(--dockle-code-name);
+  font-weight: 700;
+}
+
+.sig-object .sig-paren {
+  color: var(--dockle-code-operator);
+}
+
+dl[class] > dd {
+  margin-left: 1rem;
+}
+
+.dockle-alert {
+  --dockle-alert-color: #2563eb;
+  background: var(--dockle-background-secondary) !important;
+  border: 1px solid var(--dockle-border) !important;
+  border-left: 0.25rem solid var(--dockle-alert-color) !important;
+  border-radius: var(--dockle-radius);
+  box-shadow: none !important;
+  overflow: hidden;
+  padding: 0;
+}
+
+dl.dockle-alert,
+.dockle-alert {
+  color: var(--dockle-content);
+  margin: 1rem 0;
+  padding: 0;
+}
+
+.dockle-alert-title,
+.admonition-title {
+  align-items: center;
+  background: color-mix(in srgb, var(--dockle-alert-color) 16%, var(--dockle-background)) !important;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--dockle-alert-color) 32%, transparent);
+  color: var(--dockle-alert-color) !important;
+  display: flex;
+  font-weight: 700;
+  gap: 0.45rem;
+  margin: 0 !important;
+  padding: 0.45rem 0.8rem;
+}
+
+.dockle-alert:not(dl) > :not(.dockle-alert-title, .admonition-title) {
+  margin-left: 1rem;
+  margin-right: 1rem;
+}
+
+.dockle-alert:not(dl) > :last-child {
+  margin-bottom: 0.9rem;
+}
+
+dl.dockle-alert > dd {
+  margin: 0 !important;
+  padding: 0.8rem 1rem;
+}
+
+.dockle-alert-tip,
+.dockle-alert-hint {
+  --dockle-alert-color: #16803c;
+}
+
+.dockle-alert-important,
+.dockle-alert-todo {
+  --dockle-alert-color: #7c3aed;
+}
+
+.dockle-alert-warning {
+  --dockle-alert-color: #c76d00;
+}
+
+.dockle-alert-attention,
+.dockle-alert-caution {
+  --dockle-alert-color: #c2410c;
+}
+
+.dockle-alert-danger,
+.dockle-alert-error {
+  --dockle-alert-color: #dc2626;
+}
+
+.dockle-alert-seealso {
+  --dockle-alert-color: #087f8c;
+}
+
+.dockle-tabs {
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  margin: 1rem 0;
+  overflow: hidden;
+}
+
+.dockle-tab-list {
+  background: var(--dockle-background-secondary);
+  border-bottom: 1px solid var(--dockle-border);
+  display: flex;
+  gap: 0.2rem;
+  overflow-x: auto;
+  padding: 0.35rem 0.4rem 0;
+}
+
+.dockle-tab-list button {
+  background: transparent;
+  border: 0;
+  border-bottom: 0.2rem solid transparent;
+  color: var(--dockle-muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  padding: 0.5rem 0.8rem;
+}
+
+.dockle-tab-list button[aria-selected="true"] {
+  border-bottom-color: var(--dockle-primary);
+  color: var(--dockle-primary);
+}
+
+.dockle-tab-list button:hover,
+.dockle-tab-list button:focus-visible {
+  background: color-mix(in srgb, var(--dockle-primary) 8%, transparent);
+  color: var(--dockle-primary);
+}
+
+.dockle-tab-list button:focus-visible {
+  outline: 2px solid var(--dockle-primary);
+  outline-offset: -2px;
+}
+
+.dockle-tab-panel {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+}
+
+.dockle-tab-panel[hidden] {
+  display: none !important;
+}
+
+.dockle-tab-panel > :first-child {
+  margin-top: 0;
+}
+
+.dockle-tab-panel > :last-child {
+  margin-bottom: 0;
+}
+
+.dockle-home,
+.dockle-home:visited {
+  align-items: center;
+  background: var(--dockle-primary);
+  border: 1px solid color-mix(in srgb, var(--dockle-primary) 75%, black);
+  border-radius: 999px;
+  bottom: 1rem;
+  box-shadow: 0 0.2rem 0.7rem color-mix(in srgb, black 18%, transparent);
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 650;
+  left: 1.25rem;
+  padding: 0.35rem 0.75rem;
+  position: fixed;
+  right: auto;
+  text-decoration: none;
+  z-index: 120;
+}
+
+.dockle-home:hover {
+  filter: brightness(1.08);
+}
+
+.dockle-compat-brand,
+.dockle-compat-brand:visited {
+  align-items: center;
+  color: var(--dockle-content);
+  display: flex;
+  font-family: var(--dockle-font);
+  gap: 0.5rem;
+  left: var(--dockle-sidebar-padding);
+  min-height: 2rem;
+  position: fixed;
+  text-decoration: none;
+  top: 1.5rem;
+  transition: top 160ms ease-out;
+  width: calc(var(--dockle-sidebar-width) - (2 * var(--dockle-sidebar-padding)));
+  z-index: 120;
+}
+
+.dockle-compat-brand:hover,
+.dockle-compat-brand:focus-visible {
+  text-decoration: none;
+}
+
+.dockle-compat-brand strong {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.dockle-compat-brand span {
+  color: var(--dockle-muted);
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+/* Dockle's first-party Sphinx theme. */
+.dockle-shell {
+  min-height: 100vh;
+}
+
+.dockle-sidebar {
+  background: var(--dockle-background-secondary);
+  border-right: 1px solid var(--dockle-border);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  left: 0;
+  overflow: hidden;
+  padding: 0;
+  position: fixed;
+  top: 0;
+  width: var(--dockle-sidebar-width);
+  z-index: 20;
+}
+
+.dockle-sidebar::before,
+html[data-dockle-framework="doxygen"] #side-nav::before,
+html[data-dockle-framework="jsdoc"] body > nav::before,
+html[data-dockle-framework="rustdoc"] .sidebar::before {
+  background: var(--dockle-background-secondary);
+  border-right: 1px solid var(--dockle-border);
+  content: "";
+  height: var(--dockle-sidebar-header-height);
+  left: 0;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  width: var(--dockle-sidebar-width);
+  z-index: 1;
+  transition: height 160ms ease-out;
+}
+
+.dockle-brand {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  left: var(--dockle-sidebar-padding);
+  min-height: 2rem;
+  position: fixed;
+  top: 1.5rem;
+  transition: top 160ms ease-out;
+  width: calc(var(--dockle-sidebar-width) - (2 * var(--dockle-sidebar-padding)));
+  z-index: 2;
+}
+
+.dockle-brand a,
+.dockle-mobile-header a {
+  align-items: center;
+  color: var(--dockle-content);
+  display: inline-flex;
+  font-size: 1.25rem;
+  font-weight: 700;
+  gap: 0.5rem;
+  line-height: 1.3;
+  text-decoration: none;
+}
+
+.dockle-brand a:hover,
+.dockle-brand a:focus-visible {
+  text-decoration: none;
+}
+
+.dockle-brand > a {
+  gap: 0.5rem;
+}
+
+.dockle-logo {
+  flex: 0 0 auto;
+  height: var(--dockle-sidebar-logo-size);
+  margin: 0;
+  object-fit: contain;
+  transition: height 160ms ease-out, width 160ms ease-out;
+  width: var(--dockle-sidebar-logo-size);
+}
+
+#projectname .dockle-logo {
+  vertical-align: middle;
+}
+
+.dockle-toolbar {
+  align-items: stretch;
+  display: flex;
+  gap: 0.5rem;
+  left: var(--dockle-sidebar-padding);
+  position: fixed;
+  top: var(--dockle-sidebar-toolbar-top);
+  transition: top 160ms ease-out;
+  width: calc(var(--dockle-sidebar-width) - (2 * var(--dockle-sidebar-padding)));
+  z-index: 130;
+}
+
+@media (min-width: 801px) {
+  :root[data-dockle-has-logo]:not([data-dockle-sidebar-compact]) {
+    --dockle-sidebar-header-height: 13rem;
+    --dockle-sidebar-toolbar-top: 9.25rem;
+    --dockle-sidebar-logo-size: 4.5rem;
+  }
+
+  :root[data-dockle-has-logo]:not([data-dockle-sidebar-compact]) .dockle-brand,
+  :root[data-dockle-has-logo]:not([data-dockle-sidebar-compact]) .dockle-compat-brand {
+    flex-direction: column;
+    gap: 0.15rem;
+    text-align: center;
+    top: 0.75rem;
+  }
+
+  :root[data-dockle-has-logo]:not([data-dockle-sidebar-compact]) .dockle-brand > a {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+}
+
+.dockle-universal-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+}
+
+.dockle-version {
+  color: var(--dockle-muted);
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.dockle-search input[type="search"] {
+  background: var(--dockle-background);
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  color: var(--dockle-content);
+  font: inherit;
+  height: 2.6rem;
+  padding: 0.55rem 3rem 0.55rem 0.7rem;
+  width: 100%;
+}
+
+.dockle-search-submit {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dockle-radius);
+  color: var(--dockle-muted);
+  cursor: pointer;
+  display: flex;
+  height: 2.6rem;
+  justify-content: center;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 2.6rem;
+  z-index: 1;
+}
+
+.dockle-search-submit:hover,
+.dockle-search-submit:focus-visible {
+  color: var(--dockle-primary);
+}
+
+.dockle-search input[type="search"]:focus-visible {
+  border-color: var(--dockle-primary);
+  outline: 2px solid color-mix(in srgb, var(--dockle-primary) 35%, transparent);
+  outline-offset: 1px;
+}
+
+.dockle-search-results {
+  background: var(--dockle-background);
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  list-style: none;
+  margin: 0.35rem 0 0;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  position: absolute;
+  width: 100%;
+  z-index: 140;
+}
+
+.dockle-search-results li {
+  color: var(--dockle-muted);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.45rem;
+}
+
+.dockle-search-results a {
+  color: var(--dockle-content);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  text-decoration: none;
+}
+
+.dockle-live-search-snippet {
+  color: var(--dockle-muted);
+  display: block;
+  line-height: 1.4;
+}
+
+.dockle-search-results mark,
+.dockle-search-page-results mark {
+  background: color-mix(in srgb, var(--dockle-primary) 25%, transparent);
+  border-radius: 0.15rem;
+  color: inherit;
+}
+
+.dockle-search-results a:hover,
+.dockle-search-results a:focus-visible {
+  color: var(--dockle-primary);
+}
+
+.dockle-search-main {
+  display: block;
+}
+
+.dockle-search-page-results {
+  list-style: none;
+  padding: 0;
+}
+
+.dockle-search-page-results li {
+  border-bottom: 1px solid var(--dockle-border);
+  padding: 0.8rem 0;
+}
+
+.dockle-search-page-results a {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.dockle-search-page-results p {
+  color: var(--dockle-muted);
+  margin: 0.35rem 0 0;
+}
+
+.dockle-search-more {
+  background: var(--dockle-background);
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  color: var(--dockle-content);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.6rem 1rem;
+}
+
+.dockle-sidebar .dockle-tree {
+  flex: 1 1 auto;
+  margin: 0;
+  min-height: 0;
+  overflow-anchor: none;
+  overflow-y: auto;
+  padding: var(--dockle-sidebar-header-height) var(--dockle-sidebar-padding) 4.25rem;
+  scrollbar-gutter: stable;
+  transition: padding-top 160ms ease-out;
+}
+
+.dockle-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 0.85rem;
+}
+
+.dockle-tree > ul {
+  padding-left: 0;
+}
+
+.dockle-tree li {
+  margin: 0.25rem 0;
+}
+
+.dockle-tree a {
+  border-radius: 0.2rem;
+  color: var(--dockle-muted);
+  display: block;
+  font-size: 0.95rem;
+  padding: 0.25rem 0.35rem;
+  text-decoration: none;
+}
+
+.dockle-tree a:hover,
+.dockle-tree a.dockle-current,
+.dockle-tree a[aria-current="page"] {
+  background: color-mix(in srgb, var(--dockle-primary) 10%, transparent);
+  color: var(--dockle-primary);
+}
+
+.dockle-root-tree + ul {
+  margin-top: 0.25rem;
+}
+
+.dockle-portal-repository a {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.dockle-page {
+  margin-left: var(--dockle-sidebar-width);
+  min-width: 0;
+}
+
+.dockle-main {
+  display: grid;
+  gap: var(--dockle-column-gap);
+  grid-template-columns: minmax(0, var(--dockle-content-width)) minmax(10rem, 14rem);
+  justify-content: start;
+  padding: 2rem var(--dockle-content-gutter);
+}
+
+.dockle-article {
+  min-width: 0;
+  position: relative;
+}
+
+.dockle-article > :first-child {
+  margin-top: 0;
+}
+
+.dockle-article > section:first-of-type > h1:first-child,
+.dockle-article > h1:first-of-type {
+  margin-top: 0;
+}
+
+.dockle-on-this-page {
+  align-self: start;
+  font-size: 0.85rem;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
+  position: sticky;
+  top: 2rem;
+}
+
+.dockle-on-this-page ul {
+  list-style: none;
+  padding-left: 0.75rem;
+}
+
+.dockle-on-this-page > ul {
+  padding-left: 0;
+}
+
+.dockle-on-this-page a {
+  border-radius: 0.25rem;
+  color: var(--dockle-muted);
+  display: block;
+  margin-left: -0.4rem;
+  padding: 0.2rem 0.4rem;
+  text-decoration: none;
+}
+
+.dockle-on-this-page a:hover {
+  color: var(--dockle-primary);
+}
+
+.dockle-on-this-page a.dockle-toc-current,
+#page-nav a.dockle-toc-current {
+  background: color-mix(in srgb, var(--dockle-primary) 12%, transparent);
+  color: var(--dockle-primary) !important;
+  font-weight: 600;
+}
+
+.dockle-compat-toc {
+  background: transparent;
+  bottom: 2rem;
+  max-height: none;
+  overflow-y: auto;
+  padding: 0;
+  position: fixed;
+  right: var(--dockle-content-gutter);
+  top: 2rem;
+  width: var(--dockle-page-toc-width);
+  z-index: 10;
+}
+
+.dockle-compat-toc > ul {
+  margin: 0;
+  padding: 0;
+}
+
+.dockle-compat-toc li {
+  line-height: 1.35;
+  margin: 0.4rem 0;
+}
+
+.dockle-compat-toc .dockle-toc-depth-1 {
+  padding-left: 0.75rem;
+}
+
+.dockle-compat-toc .dockle-toc-depth-2 {
+  padding-left: 1.5rem;
+}
+
+.dockle-page-links {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-top: 3rem;
+}
+
+.dockle-page-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 1;
+}
+
+a.dockle-page-action,
+a.dockle-page-action:link,
+a.dockle-page-action:visited {
+  align-items: center;
+  background: var(--dockle-background-secondary);
+  border: 1px solid var(--dockle-border);
+  border-radius: 50%;
+  color: var(--dockle-content) !important;
+  display: inline-flex;
+  flex: 0 0 2.6rem;
+  height: 2.6rem;
+  justify-content: center;
+  text-decoration: none;
+  transition: border-color 120ms ease, color 120ms ease;
+  width: 2.6rem;
+}
+
+a.dockle-page-action:hover,
+a.dockle-page-action:focus-visible {
+  border-color: var(--dockle-primary);
+  color: var(--dockle-primary) !important;
+}
+
+.dockle-page-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--dockle-primary) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.dockle-page-action .lucide,
+.dockle-theme-toggle .lucide,
+.dockle-repository-icon {
+  height: 1.2rem;
+  width: 1.2rem;
+}
+
+.dockle-repository-icon {
+  fill: currentColor;
+}
+
+.dockle-page-links a,
+.dockle-page-links a:visited {
+  align-items: center;
+  background: var(--dockle-background-secondary);
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  color: var(--dockle-content);
+  display: flex;
+  gap: 0.75rem;
+  max-width: calc(50% - 0.5rem);
+  min-width: 11rem;
+  padding: 0.75rem 0.9rem;
+  text-decoration: none;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.dockle-page-links a:hover {
+  border-color: var(--dockle-primary);
+  color: var(--dockle-primary);
+  transform: translateY(-1px);
+}
+
+.dockle-page-links a small {
+  color: var(--dockle-muted);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.dockle-page-links a span {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dockle-next {
+  justify-content: flex-end;
+  margin-left: auto;
+  text-align: right;
+}
+
+.dockle-footer,
+.dockle-built-with {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  bottom: auto;
+  color: var(--dockle-muted);
+  font-size: 0.8rem;
+  font-style: normal;
+  margin: 3rem 0 0;
+  max-width: var(--dockle-content-width);
+  padding: 1rem 0 2rem;
+  position: static;
+  right: auto;
+  width: 100%;
+  z-index: auto;
+}
+
+.dockle-footer a,
+.dockle-built-with a {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.dockle-theme-toggle {
+  background: var(--dockle-background-secondary);
+  border: 1px solid var(--dockle-border);
+  border-radius: 50%;
+  color: var(--dockle-content);
+  cursor: pointer;
+  display: grid;
+  flex: 0 0 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  position: static;
+  width: 2.6rem;
+}
+
+.dockle-theme-toggle:hover {
+  border-color: var(--dockle-primary);
+  color: var(--dockle-primary);
+}
+
+.dockle-portal > .dockle-theme-toggle {
+  position: fixed;
+  right: 1rem;
+  top: 1rem;
+  z-index: 30;
+}
+
+.dockle-mobile-header {
+  display: none;
+}
+
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Multi-target documentation portal. */
+.dockle-portal {
+  min-height: 100vh;
+}
+
+.dockle-portal > main {
+  margin: 0 auto;
+  max-width: 72rem;
+  padding: clamp(3rem, 8vw, 7rem) clamp(1.25rem, 5vw, 4rem);
+}
+
+.dockle-portal header {
+  align-items: center;
+  display: flex;
+  gap: 1.5rem;
+  max-width: 48rem;
+}
+
+.dockle-portal-logo {
+  height: 6rem;
+  object-fit: contain;
+  width: 6rem;
+}
+
+.dockle-portal header h1 {
+  margin: 0.2rem 0 0.75rem;
+}
+
+.dockle-portal header h1 span {
+  color: var(--dockle-muted);
+  font-size: 0.4em;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.dockle-portal-kicker,
+.dockle-portal-framework {
+  color: var(--dockle-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dockle-portal-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  margin: 2.5rem 0;
+}
+
+.dockle-portal-card {
+  background: var(--dockle-background-secondary);
+  border: 1px solid var(--dockle-border);
+  border-radius: calc(var(--dockle-radius) * 1.5);
+  color: var(--dockle-content);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 10rem;
+  padding: 1.25rem;
+  text-decoration: none;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.dockle-portal-card:hover {
+  border-color: var(--dockle-primary);
+  text-decoration: none !important;
+  transform: translateY(-2px);
+}
+
+.dockle-portal-card strong {
+  font-size: 1.25rem;
+}
+
+.dockle-portal-card > span:last-child {
+  color: var(--dockle-muted);
+}
+
+.dockle-portal-docs {
+  max-width: var(--dockle-content-width);
+}
+
+.dockle-portal-repository {
+  border-top: 1px solid var(--dockle-border);
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+}
+
+/* Doxygen. */
+html[data-dockle-framework="doxygen"] {
+  --nav-font-size-level1: 1rem;
+  --nav-font-size-level2: 0.95rem;
+  --nav-font-size-level3: 0.9rem;
+}
+
+html[data-dockle-framework="doxygen"] #top,
+html[data-dockle-framework="doxygen"] #side-nav,
+html[data-dockle-framework="doxygen"] #nav-tree,
+html[data-dockle-framework="doxygen"] .navpath ul,
+html[data-dockle-framework="doxygen"] #titlearea,
+html[data-dockle-framework="doxygen"] #projectname {
+  background: var(--dockle-background-secondary) !important;
+  color: var(--dockle-content) !important;
+}
+
+html[data-dockle-framework="doxygen"] #side-nav {
+  border-right: 1px solid var(--dockle-border);
+  bottom: 0;
+  height: 100vh !important;
+  max-width: var(--dockle-sidebar-width) !important;
+  min-width: var(--dockle-sidebar-width) !important;
+  position: fixed !important;
+  top: 0 !important;
+  width: var(--dockle-sidebar-width) !important;
+  z-index: 20;
+}
+
+html[data-dockle-framework="doxygen"] #top {
+  border: 0;
+  height: auto !important;
+  position: static;
+  width: 100%;
+}
+
+html[data-dockle-framework="doxygen"] #titlearea {
+  display: none;
+}
+
+html[data-dockle-framework="doxygen"] #titlearea table,
+html[data-dockle-framework="doxygen"] #titlearea tbody,
+html[data-dockle-framework="doxygen"] #titlearea tr,
+html[data-dockle-framework="doxygen"] #titlearea td {
+  border: 0 !important;
+  display: block;
+  padding: 0 !important;
+  width: auto !important;
+}
+
+html[data-dockle-framework="doxygen"] #projectname {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+html[data-dockle-framework="doxygen"] #projectnumber {
+  color: var(--dockle-muted);
+  font-size: 0.8rem;
+}
+
+html[data-dockle-framework="doxygen"] #projectbrief {
+  display: none;
+}
+
+html[data-dockle-framework="doxygen"] #MSearchBox {
+  display: none !important;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree {
+  border: 0;
+  box-sizing: border-box;
+  height: 100vh !important;
+  overflow-anchor: none;
+  overflow: auto;
+  padding: var(--dockle-sidebar-header-height) var(--dockle-sidebar-padding) 4.25rem;
+  scrollbar-gutter: stable;
+  transition: padding-top 160ms ease-out;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree-contents {
+  margin: 0;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree ul.children_ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 0.85rem !important;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree li {
+  margin: 0.25rem 0;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree .item {
+  border-radius: 0.2rem;
+  height: auto;
+  line-height: 1.4;
+  margin: 0;
+  min-height: 1.9rem;
+  padding: 0.25rem 0.35rem;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree .label {
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree a {
+  color: var(--dockle-muted) !important;
+  text-decoration: none;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree a[href="javascript:void(0)"],
+html[data-dockle-framework="doxygen"] #nav-tree .arrow,
+html[data-dockle-framework="doxygen"] #page-nav .arrow {
+  display: none !important;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree-contents > ul > li > .item {
+  display: none;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree-contents > ul > li > .children_ul {
+  padding-left: 0 !important;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline ul {
+  padding-left: 1rem;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree .item:hover,
+html[data-dockle-framework="doxygen"] #nav-tree .dockle-current-item,
+html[data-dockle-framework="doxygen"] #nav-tree .selected {
+  background: color-mix(in srgb, var(--dockle-primary) 10%, transparent);
+  text-shadow: none;
+}
+
+html[data-dockle-framework="doxygen"] #nav-tree .selected a,
+html[data-dockle-framework="doxygen"] #nav-tree .dockle-current-item a,
+html[data-dockle-framework="doxygen"] #nav-tree .item:hover a,
+html[data-dockle-framework="doxygen"] #nav-tree a:hover {
+  background-image: none !important;
+  color: var(--dockle-primary) !important;
+  text-decoration: none !important;
+}
+
+html[data-dockle-framework="doxygen"] .glow:not(.dockle-anchor-highlight) {
+  background: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+html[data-dockle-framework="doxygen"] div.fragment .clipboard {
+  display: none !important;
+}
+
+html[data-dockle-framework="doxygen"] div.fragment,
+html[data-dockle-framework="doxygen"] div.fragment > .line {
+  color: var(--dockle-content) !important;
+}
+
+html[data-dockle-framework="doxygen"] div.fragment.dockle-code-block,
+html[data-dockle-framework="doxygen"] div.fragment.dockle-code-block > .line {
+  font-family: var(--dockle-code-font) !important;
+  font-size: 1rem !important;
+  line-height: 1.5 !important;
+}
+
+html[data-dockle-framework="doxygen"]
+  div.fragment.dockle-code-block
+  > .line:not(:has(.lineno)) {
+  padding-left: 0 !important;
+  text-indent: 0 !important;
+}
+
+html[data-dockle-framework="doxygen"] div.fragment span.comment {
+  color: var(--dockle-code-comment) !important;
+}
+
+html[data-dockle-framework="doxygen"]
+  div.fragment
+  :is(span.keyword, span.keywordflow, span.vhdlkeyword) {
+  color: var(--dockle-code-keyword) !important;
+}
+
+html[data-dockle-framework="doxygen"]
+  div.fragment
+  :is(span.keywordtype, span.preprocessor) {
+  color: var(--dockle-code-name) !important;
+}
+
+html[data-dockle-framework="doxygen"]
+  div.fragment
+  :is(span.vhdldigit, span.vhdllogic) {
+  color: var(--dockle-code-number) !important;
+}
+
+html[data-dockle-framework="doxygen"]
+  div.fragment
+  :is(span.charliteral, span.stringliteral) {
+  color: var(--dockle-code-string) !important;
+}
+
+html[data-dockle-framework="doxygen"] #nav-sync,
+html[data-dockle-framework="doxygen"] .ui-resizable-handle {
+  display: none !important;
+}
+
+html[data-dockle-framework="doxygen"] #doc-content {
+  height: auto !important;
+  margin-left: var(--dockle-sidebar-width) !important;
+  min-height: 100vh;
+  overflow: visible !important;
+  width: auto !important;
+}
+
+html[data-dockle-framework="doxygen"] #doc-content div.header {
+  background: transparent !important;
+  border-bottom: 0;
+  margin: 0;
+}
+
+html[data-dockle-framework="doxygen"] #doc-content .headertitle {
+  margin: 0;
+  max-width: calc(var(--dockle-content-width) + 8rem);
+  padding: 0;
+  position: relative;
+}
+
+html[data-dockle-framework="doxygen"]
+  #doc-content
+  .headertitle
+  > .dockle-page-actions {
+  right: var(--dockle-content-gutter);
+  top: 2rem;
+}
+
+html[data-dockle-framework="doxygen"] div.contents {
+  margin: 0;
+  max-width: calc(var(--dockle-content-width) + 8rem);
+  padding: 2rem var(--dockle-content-gutter);
+}
+
+html[data-dockle-framework="doxygen"] div.header .title {
+  color: var(--dockle-content);
+  font-family: var(--dockle-font);
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  font-weight: 650;
+  line-height: 1.25;
+  margin: 0;
+  max-width: calc(var(--dockle-content-width) + 8rem);
+  padding: 2rem var(--dockle-content-gutter);
+  padding-right: calc(var(--dockle-content-gutter) + 6.2rem);
+}
+
+html[data-dockle-framework="doxygen"] #doc-content .contents,
+html[data-dockle-framework="doxygen"] #doc-content .contents p,
+html[data-dockle-framework="doxygen"] #doc-content .contents dl,
+html[data-dockle-framework="doxygen"] #doc-content .contents table {
+  font-family: var(--dockle-font);
+  font-size: 1rem;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav {
+  background: var(--dockle-background) !important;
+  border-left: 0 !important;
+  bottom: 2rem;
+  color: var(--dockle-muted);
+  display: block !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  position: fixed !important;
+  right: var(--dockle-content-gutter);
+  top: 2rem;
+  width: var(--dockle-page-toc-width) !important;
+  z-index: 10;
+}
+
+html[data-dockle-framework="doxygen"].dockle-has-page-toc:not(.dockle-native-page-toc) #doc-content {
+  margin-right: var(--dockle-page-toc-width) !important;
+}
+
+html[data-dockle-framework="doxygen"].dockle-native-page-toc #doc-content {
+  margin-right: 0 !important;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav-resize-handle {
+  background: var(--dockle-border) !important;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav-contents {
+  padding: 0;
+}
+
+html[data-dockle-framework="doxygen"] .dockle-toc-title {
+  color: var(--dockle-content);
+  display: block;
+  font-family: var(--dockle-font);
+  margin-bottom: 0.75rem;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline {
+  margin: 0;
+  padding: 0;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline li {
+  line-height: 1.35;
+  margin: 0.4rem 0;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav .dockle-toc-depth-1 {
+  padding-left: 0.75rem;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav .dockle-toc-depth-2 {
+  padding-left: 1.5rem;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline li a {
+  border-radius: 0.25rem;
+  color: var(--dockle-muted) !important;
+  display: block;
+  font-family: var(--dockle-font);
+  font-size: 0.85rem !important;
+  margin-left: -0.4rem;
+  padding: 0.2rem 0.4rem;
+  text-decoration: none;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline li.vis > a,
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline li a:hover {
+  color: var(--dockle-primary) !important;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline li.vis {
+  background: transparent;
+}
+
+html[data-dockle-framework="doxygen"] #page-nav ul.page-outline li.vis::after {
+  content: none !important;
+}
+
+html[data-dockle-framework="doxygen"] h2.groupheader,
+html[data-dockle-framework="doxygen"] td h2.groupheader {
+  background: transparent;
+  border-bottom: 1px solid var(--dockle-border);
+  box-shadow: none;
+  color: var(--dockle-content);
+  font-size: 1.65rem;
+  font-weight: 650;
+  margin: 2rem 0 1rem;
+  padding: 0 0 0.35rem;
+}
+
+html[data-dockle-framework="doxygen"] h1.doxsection {
+  border-bottom: 1px solid var(--dockle-border);
+  font-size: 1.65rem;
+  margin: 2rem 0 1rem;
+  padding-bottom: 0.35rem;
+}
+
+html[data-dockle-framework="doxygen"] dl.note dt,
+html[data-dockle-framework="doxygen"] dl.warning dt,
+html[data-dockle-framework="doxygen"] dl.important dt,
+html[data-dockle-framework="doxygen"] dl.attention dt {
+  color: var(--dockle-content) !important;
+}
+
+html[data-dockle-framework="doxygen"] table.memberdecls tr.heading > td,
+html[data-dockle-framework="doxygen"] table.memberdecls tr.groupHeader > td,
+html[data-dockle-framework="doxygen"] table.memberdecls tr.inherit_header > td {
+  background: transparent;
+  border: 0 !important;
+  padding: 0 !important;
+}
+
+html[data-dockle-framework="doxygen"] table.memberdecls .memItemLeft,
+html[data-dockle-framework="doxygen"] table.memberdecls .memItemRight,
+html[data-dockle-framework="doxygen"] table.memberdecls .memTemplParams {
+  background: var(--dockle-background-secondary);
+  border-color: var(--dockle-border) !important;
+}
+
+html[data-dockle-framework="doxygen"] table.memberdecls .mdescLeft,
+html[data-dockle-framework="doxygen"] table.memberdecls .mdescRight,
+html[data-dockle-framework="doxygen"] table.memberdecls .memSeparator {
+  background: transparent;
+  border-color: var(--dockle-border) !important;
+}
+
+html[data-dockle-framework="doxygen"] div.directory {
+  border: 1px solid var(--dockle-border);
+  border-radius: var(--dockle-radius);
+  margin: 1rem 0;
+  overflow: hidden;
+}
+
+html[data-dockle-framework="doxygen"] table.directory {
+  border-collapse: collapse;
+  display: table;
+  font-family: var(--dockle-font);
+  font-size: 1rem;
+  margin: 0;
+  overflow: visible;
+  width: 100%;
+}
+
+html[data-dockle-framework="doxygen"] table.directory tr.even,
+html[data-dockle-framework="doxygen"] table.directory tr.odd {
+  background: transparent !important;
+}
+
+html[data-dockle-framework="doxygen"] table.directory tr:nth-child(even) {
+  background: var(--dockle-background-secondary) !important;
+}
+
+html[data-dockle-framework="doxygen"] table.directory tr:hover {
+  background: color-mix(in srgb, var(--dockle-primary) 8%, transparent) !important;
+}
+
+html[data-dockle-framework="doxygen"] table.directory td.entry,
+html[data-dockle-framework="doxygen"] table.directory td.desc {
+  background: transparent !important;
+  border-color: var(--dockle-border) !important;
+  color: var(--dockle-content);
+  line-height: 1.5;
+  padding: 0.65rem 0.8rem !important;
+}
+
+html[data-dockle-framework="doxygen"] .levels {
+  color: var(--dockle-muted);
+  font-family: var(--dockle-font);
+  margin: 0 0 0.75rem;
+}
+
+html[data-dockle-framework="doxygen"] .levels a {
+  color: var(--dockle-primary) !important;
+  text-decoration: none;
+}
+
+html[data-dockle-framework="doxygen"] .icona {
+  height: auto;
+  margin: 0 0.35rem;
+  width: auto;
+}
+
+html[data-dockle-framework="doxygen"] .icon {
+  background: var(--dockle-primary) !important;
+  border-radius: 0.2rem;
+  color: white !important;
+  font-family: var(--dockle-font);
+}
+
+html[data-dockle-framework="doxygen"] .classindex dl.even,
+html[data-dockle-framework="doxygen"] .classindex dl.odd {
+  background: transparent !important;
+  border-bottom: 1px solid var(--dockle-border);
+}
+
+html[data-dockle-framework="doxygen"] .dockle-home {
+  bottom: 1rem;
+}
+
+html[data-dockle-framework="doxygen"] .dockle-compat-brand {
+  display: flex;
+}
+
+html[data-dockle-framework="doxygen"] #nav-path {
+  display: none !important;
+}
+
+html[data-dockle-framework="doxygen"] .dockle-generated-page-links {
+  max-width: var(--dockle-content-width);
+}
+
+html[data-dockle-framework="doxygen"] .dockle-alert,
+html[data-dockle-framework="doxygen"] .dockle-alert dd {
+  color: var(--dockle-content) !important;
+}
+
+html[data-dockle-framework="doxygen"] .memitem,
+html[data-dockle-framework="doxygen"] .memproto,
+html[data-dockle-framework="doxygen"] .memdoc {
+  background: var(--dockle-background-secondary) !important;
+  border-color: var(--dockle-border) !important;
+  box-shadow: none !important;
+}
+
+html[data-dockle-framework="doxygen"] .memitem {
+  border: 1px solid var(--dockle-border) !important;
+  border-radius: var(--dockle-radius);
+  overflow: hidden;
+}
+
+html[data-dockle-framework="doxygen"] .memproto {
+  border: 0 !important;
+  border-bottom: 1px solid var(--dockle-border) !important;
+  padding: 0.8rem;
+}
+
+html[data-dockle-framework="doxygen"] .memdoc {
+  border: 0 !important;
+  padding: 0.8rem 1rem;
+}
+
+html[data-dockle-framework="doxygen"] h2.memtitle {
+  background: var(--dockle-code-background);
+  border: 1px solid var(--dockle-border);
+  border-bottom: 0;
+  border-radius: var(--dockle-radius) var(--dockle-radius) 0 0;
+  box-shadow: none;
+  color: var(--dockle-content);
+  font-family: var(--dockle-code-font);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+@media (min-width: 801px) {
+  html[data-dockle-framework="doxygen"] #main-nav,
+  html[data-dockle-framework="doxygen"] #main-nav-mobile {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1500px) {
+  .dockle-compat-toc,
+  html[data-dockle-framework="doxygen"] #page-nav {
+    left: calc(
+      var(--dockle-sidebar-width) + var(--dockle-content-gutter) +
+      var(--dockle-content-width) + var(--dockle-column-gap)
+    );
+    right: auto;
+  }
+}
+
+/* JSDoc's default template. */
+html[data-dockle-framework="jsdoc"] body > nav {
+  background: var(--dockle-background-secondary);
+  border-right: 1px solid var(--dockle-border);
+  bottom: 0;
+  margin: 0;
+  height: 100vh;
+  overflow-anchor: none;
+  overflow-y: auto;
+  padding: var(--dockle-sidebar-header-height) var(--dockle-sidebar-padding) 4.25rem;
+  position: fixed;
+  top: 0;
+  width: var(--dockle-sidebar-width);
+  scrollbar-gutter: stable;
+  transition: padding-top 160ms ease-out;
+  z-index: 20;
+}
+
+html[data-dockle-framework="jsdoc"] body > nav h2,
+html[data-dockle-framework="jsdoc"] body > nav h3 {
+  border: 0;
+  color: var(--dockle-content);
+  font-family: var(--dockle-font);
+  font-size: 0.95rem;
+  margin: 1rem 0 0.25rem;
+  padding: 0;
+}
+
+html[data-dockle-framework="jsdoc"] body > nav h2 {
+  margin-top: 0;
+}
+
+html[data-dockle-framework="jsdoc"] body > nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+html[data-dockle-framework="jsdoc"] body > nav ul ul {
+  padding-left: 0.85rem;
+}
+
+html[data-dockle-framework="jsdoc"] body > nav li {
+  margin: 0.25rem 0;
+}
+
+html[data-dockle-framework="jsdoc"] body > nav a {
+  border-radius: 0.2rem;
+  color: var(--dockle-muted);
+  display: block;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+  padding: 0.25rem 0.35rem;
+  text-decoration: none;
+}
+
+html[data-dockle-framework="jsdoc"] body > nav a:hover,
+html[data-dockle-framework="jsdoc"] body > nav a.dockle-current,
+html[data-dockle-framework="jsdoc"] body > nav a[aria-current="page"] {
+  background: color-mix(in srgb, var(--dockle-primary) 10%, transparent);
+  color: var(--dockle-primary);
+}
+
+html[data-dockle-framework="jsdoc"] body > main,
+html[data-dockle-framework="jsdoc"] body > #main {
+  margin-left: var(--dockle-sidebar-width);
+  max-width: none;
+  padding: 2rem var(--dockle-content-gutter);
+  position: relative;
+  width: auto;
+}
+
+html[data-dockle-framework="jsdoc"] #main > .dockle-page-actions {
+  right: max(
+    var(--dockle-content-gutter),
+    calc(100% - var(--dockle-content-width) - var(--dockle-content-gutter))
+  );
+  top: 2rem;
+}
+
+html[data-dockle-framework="jsdoc"].dockle-has-page-toc body > main,
+html[data-dockle-framework="jsdoc"].dockle-has-page-toc body > #main {
+  margin-right: 0;
+  width: calc(
+    100% - var(--dockle-sidebar-width) - var(--dockle-page-toc-width) - var(--dockle-content-gutter)
+  );
+}
+
+html[data-dockle-framework="jsdoc"] #main > h1,
+html[data-dockle-framework="jsdoc"] #main > h2 {
+  margin-left: 0;
+  margin-top: 0;
+  max-width: var(--dockle-content-width);
+}
+
+html[data-dockle-framework="jsdoc"] #main article h1,
+html[data-dockle-framework="jsdoc"] #main article h2 {
+  margin-left: 0;
+}
+
+html[data-dockle-framework="jsdoc"] #main section {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  margin: 0 0 2rem;
+  max-width: var(--dockle-content-width);
+  padding: 0 !important;
+}
+
+html[data-dockle-framework="jsdoc"] #main article {
+  float: none;
+  margin: 0;
+  max-width: var(--dockle-content-width);
+  padding: 0;
+  width: auto;
+}
+
+html[data-dockle-framework="jsdoc"].dockle-component-reference #main > h1.page-title,
+html[data-dockle-framework="jsdoc"].dockle-component-reference #main > section > header {
+  display: none;
+}
+
+html[data-dockle-framework="jsdoc"] #main > .dockle-built-with {
+  margin-left: 0;
+}
+
+html[data-dockle-framework="jsdoc"] .signature,
+html[data-dockle-framework="jsdoc"] .type-signature {
+  color: var(--dockle-muted) !important;
+}
+
+html[data-dockle-framework="jsdoc"]
+  :is(.params, .props)
+  .name
+  code {
+  background: var(--dockle-code-background) !important;
+  color: var(--dockle-content) !important;
+}
+
+html[data-dockle-framework="jsdoc"] pre.prettyprint code {
+  background: transparent !important;
+  color: var(--dockle-content) !important;
+  padding: 0 !important;
+}
+
+html[data-dockle-framework="jsdoc"] pre.prettyprint .pln,
+html[data-dockle-framework="jsdoc"] pre.prettyprint .pun {
+  color: var(--dockle-content) !important;
+}
+
+/* rustdoc. */
+html[data-dockle-framework="rustdoc"] {
+  --desktop-sidebar-width: var(--dockle-sidebar-width);
+  --code-block-background-color: var(--dockle-code-background);
+  --link-color: var(--dockle-primary);
+  --main-background-color: var(--dockle-background);
+  --main-color: var(--dockle-content);
+  --sidebar-background-color: var(--dockle-background-secondary);
+  --sidebar-current-link-background-color: color-mix(
+    in srgb,
+    var(--dockle-primary) 10%,
+    transparent
+  );
+  --sidebar-link-color: var(--dockle-primary);
+  --target-background-color: transparent;
+}
+
+html[data-dockle-framework="rustdoc"] #main-content :target {
+  animation: none !important;
+  background: transparent !important;
+  border-right: 0 !important;
+}
+
+html[data-dockle-framework="rustdoc"]
+  #main-content
+  :target.dockle-anchor-highlight {
+  animation: dockle-anchor-highlight 650ms ease-out !important;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar {
+  background: var(--dockle-background-secondary) !important;
+  border-right: 1px solid var(--dockle-border);
+  box-sizing: border-box;
+  overflow-anchor: none;
+  padding-bottom: 4.25rem !important;
+  padding-top: var(--dockle-sidebar-header-height) !important;
+  scrollbar-gutter: stable;
+  transition: padding-top 160ms ease-out;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar-resizer {
+  display: none !important;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar .sidebar-crate,
+html[data-dockle-framework="rustdoc"] .sidebar .sidebar-elems {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 var(--dockle-sidebar-padding);
+  width: 100%;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar h2,
+html[data-dockle-framework="rustdoc"] .sidebar h3 {
+  border: 0;
+  color: var(--dockle-content);
+  font-family: var(--dockle-font);
+  font-size: 0.95rem;
+  margin: 1rem 0 0.25rem;
+  padding: 0;
+}
+
+html[data-dockle-framework="rustdoc"] body.rustdoc:not(.src) > main {
+  padding: 2rem var(--dockle-content-gutter) 4rem !important;
+}
+
+html[data-dockle-framework="rustdoc"] body > main,
+html[data-dockle-framework="rustdoc"] #main-content {
+  position: relative;
+}
+
+/* Rustdoc renders Settings, Help, and Summary inside the heading row. */
+html[data-dockle-framework="rustdoc"] #main-content > .main-heading {
+  margin-right: 6.7rem;
+}
+
+html[data-dockle-framework="rustdoc"] body.rustdoc:not(.src) > main > .width-limiter {
+  margin-left: 0;
+  margin-right: auto;
+  max-width: var(--dockle-content-width);
+}
+
+html[data-dockle-framework="rustdoc"].dockle-has-page-toc body > main {
+  margin-right: 0;
+  padding-left: var(--dockle-content-gutter);
+  padding-right: var(--dockle-content-gutter);
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar .sidebar-crate h2 {
+  margin-top: 0;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar ul.block,
+html[data-dockle-framework="rustdoc"] .sidebar ul.block ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 0.85rem;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar ul.block {
+  padding-left: 0;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar li {
+  margin: 0.25rem 0;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar a,
+html[data-dockle-framework="rustdoc"] .sidebar a:visited {
+  border-radius: 0.2rem;
+  color: var(--dockle-muted) !important;
+  display: block;
+  font-family: var(--dockle-font);
+  font-size: 0.95rem;
+  margin: 0 !important;
+  overflow-wrap: anywhere;
+  padding: 0.25rem 0.35rem;
+  text-decoration: none;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar a:hover,
+html[data-dockle-framework="rustdoc"] .sidebar a.dockle-current,
+html[data-dockle-framework="rustdoc"] .sidebar a[aria-current="page"] {
+  background: color-mix(in srgb, var(--dockle-primary) 10%, transparent);
+  color: var(--dockle-primary) !important;
+}
+
+html[data-dockle-framework="rustdoc"] .sidebar .version {
+  color: var(--dockle-muted);
+  font-family: var(--dockle-font);
+  font-size: 0.8rem;
+}
+
+html[data-dockle-framework="rustdoc"] .search-form {
+  display: none !important;
+}
+
+html[data-dockle-framework="rustdoc"] #search-button {
+  display: none !important;
+}
+
+html[data-dockle-framework="rustdoc"].dockle-component-reference #main-content > .main-heading,
+html[data-dockle-framework="rustdoc"].dockle-component-reference details.top-doc > summary,
+html[data-dockle-framework="rustdoc"].dockle-component-reference .top-doc .docblock > p:first-child {
+  display: none;
+}
+
+html[data-dockle-framework="rustdoc"].dockle-component-reference .top-doc .docblock {
+  margin-left: 0;
+}
+
+html[data-dockle-framework="rustdoc"].dockle-component-reference #component-reference {
+  border-bottom: 0;
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  line-height: 1.2;
+  margin-top: 0;
+}
+
+html[data-dockle-framework="rustdoc"].dockle-component-reference .top-doc .docblock > h3 {
+  font-size: 1.65rem;
+}
+
+html[data-dockle-framework="rustdoc"].dockle-component-reference .top-doc .docblock > h4 {
+  font-size: 1.25rem;
+}
+
+html[data-dockle-framework="rustdoc"] .rustdoc .main-heading,
+html[data-dockle-framework="rustdoc"] .rustdoc .sub-heading,
+html[data-dockle-framework="rustdoc"] .rustdoc .item-table {
+  border-color: var(--dockle-border) !important;
+}
+
+html[data-dockle-framework="rustdoc"] .dockle-code-block > pre {
+  box-sizing: border-box;
+  font-size: 1rem !important;
+  line-height: 1.5 !important;
+  width: 100%;
+}
+
+html[data-dockle-framework="rustdoc"] .dockle-code-block > pre > code {
+  background: transparent !important;
+  border-radius: 0 !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  padding: 0 !important;
+}
+
+html[data-dockle-framework="rustdoc"]
+  .dockle-code-block
+  > .button-holder {
+  display: none !important;
+}
+
+html[data-dockle-framework="rustdoc"] #copy-path::before,
+html[data-dockle-framework="rustdoc"] .settings-menu > a::before,
+html[data-dockle-framework="rustdoc"] .help-menu > a::before,
+html[data-dockle-framework="rustdoc"] button#toggle-all-docs::before {
+  content: none !important;
+}
+
+html[data-dockle-framework="rustdoc"] #copy-path {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+html[data-dockle-framework="rustdoc"] .dockle-rustdoc-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 1.125rem;
+  justify-content: center;
+  margin: 0.5rem;
+  width: 1.125rem;
+}
+
+html[data-dockle-framework="rustdoc"] #copy-path .dockle-rustdoc-icon,
+html[data-dockle-framework="rustdoc"] rustdoc-toolbar .dockle-rustdoc-icon {
+  margin: 0;
+}
+
+html[data-dockle-framework="rustdoc"] .dockle-rustdoc-icon .lucide {
+  height: 100%;
+  width: 100%;
+}
+
+html[data-dockle-framework="rustdoc"] rustdoc-topbar {
+  background: var(--dockle-background-secondary) !important;
+  border-bottom: 1px solid var(--dockle-border);
+  color: var(--dockle-content);
+}
+
+@media (min-width: 801px) and (max-width: 1100px) {
+  .dockle-main {
+    grid-template-columns: minmax(0, var(--dockle-content-width));
+  }
+
+  .dockle-on-this-page {
+    display: none;
+  }
+}
+
+@media (min-width: 801px) and (max-width: 1499px) {
+  html[data-dockle-framework="doxygen"] #page-nav {
+    display: none !important;
+  }
+
+  html[data-dockle-framework="rustdoc"] .dockle-compat-toc {
+    display: none;
+  }
+
+  html[data-dockle-framework="doxygen"].dockle-has-page-toc #doc-content {
+    margin-right: 0 !important;
+  }
+}
+
+@media (max-width: 800px) {
+  html[data-dockle-framework="rustdoc"] #main-content > .dockle-page-actions {
+    margin-bottom: 1rem;
+    position: static;
+  }
+
+  html[data-dockle-framework="rustdoc"] #main-content > .main-heading {
+    margin-right: 0;
+  }
+
+  .dockle-sidebar::before,
+  html[data-dockle-framework="doxygen"] #side-nav::before,
+  html[data-dockle-framework="jsdoc"] body > nav::before,
+  html[data-dockle-framework="rustdoc"] .sidebar::before {
+    content: none;
+  }
+
+  .dockle-toolbar {
+    left: auto;
+    margin: 0.75rem 1rem;
+    position: relative;
+    top: auto;
+    width: auto;
+  }
+
+  .dockle-sidebar .dockle-tree {
+    flex: initial;
+    margin-top: 0;
+    overflow-y: visible;
+    padding: 0;
+    scrollbar-gutter: auto;
+  }
+
+  .dockle-portal header {
+    align-items: flex-start;
+  }
+
+  .dockle-portal-logo {
+    height: 4rem;
+    width: 4rem;
+  }
+  .dockle-home,
+  .dockle-home:visited {
+    left: auto;
+    right: 1rem;
+  }
+
+  .dockle-compat-brand {
+    display: none;
+  }
+
+  html[data-dockle-framework="doxygen"] .dockle-compat-brand {
+    align-items: baseline;
+    background: var(--dockle-background-secondary);
+    border-bottom: 1px solid var(--dockle-border);
+    display: flex;
+    left: auto;
+    padding: 0.75rem 1rem;
+    position: static;
+    top: auto;
+    width: 100%;
+  }
+
+  .dockle-sidebar {
+    gap: 1rem;
+    overflow-y: auto;
+    padding: 1.5rem var(--dockle-sidebar-padding) 4.25rem;
+    box-shadow: 0 0 2rem color-mix(in srgb, black 25%, transparent);
+    transform: translateX(-105%);
+    transition: transform 160ms ease-out;
+  }
+
+  [data-sidebar-open] .dockle-sidebar {
+    transform: translateX(0);
+  }
+
+  .dockle-brand {
+    left: auto;
+    position: static;
+    top: auto;
+    width: auto;
+  }
+
+  .dockle-page {
+    margin-left: 0;
+  }
+
+  .dockle-mobile-header {
+    align-items: center;
+    background: var(--dockle-background-secondary);
+    border-bottom: 1px solid var(--dockle-border);
+    display: flex;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .dockle-mobile-header button {
+    background: var(--dockle-background);
+    border: 1px solid var(--dockle-border);
+    border-radius: var(--dockle-radius);
+    color: var(--dockle-content);
+    font: inherit;
+    padding: 0.35rem 0.65rem;
+  }
+
+  .dockle-main {
+    display: block;
+    padding: 1.25rem;
+  }
+
+  .dockle-on-this-page {
+    display: none;
+  }
+
+  html[data-dockle-framework="jsdoc"] body > nav {
+    border-bottom: 1px solid var(--dockle-border);
+    border-right: 0;
+    max-height: 16rem;
+    order: 0;
+    padding: 1rem;
+    position: static;
+    width: 100%;
+  }
+
+  html[data-dockle-framework="jsdoc"] body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  html[data-dockle-framework="jsdoc"] .dockle-compat-brand {
+    align-items: baseline;
+    background: var(--dockle-background-secondary);
+    border-bottom: 1px solid var(--dockle-border);
+    display: flex;
+    left: auto;
+    order: -1;
+    padding: 0.75rem 1rem;
+    position: static;
+    top: auto;
+    width: 100%;
+  }
+
+  html[data-dockle-framework="jsdoc"] .dockle-toolbar {
+    order: 0;
+  }
+
+  html[data-dockle-framework="jsdoc"] body > main,
+  html[data-dockle-framework="jsdoc"] body > #main,
+  html[data-dockle-framework="doxygen"] #doc-content {
+    margin-left: 0 !important;
+  }
+
+  html[data-dockle-framework="jsdoc"].dockle-has-page-toc body > main,
+  html[data-dockle-framework="jsdoc"].dockle-has-page-toc body > #main,
+  html[data-dockle-framework="rustdoc"].dockle-has-page-toc body > main {
+    margin-right: 0;
+  }
+
+  html[data-dockle-framework="jsdoc"].dockle-has-page-toc body > main,
+  html[data-dockle-framework="jsdoc"].dockle-has-page-toc body > #main {
+    width: auto;
+  }
+
+  html[data-dockle-framework="jsdoc"] body > main,
+  html[data-dockle-framework="jsdoc"] body > #main {
+    order: 1;
+  }
+
+  html[data-dockle-framework="jsdoc"] footer {
+    margin-left: 0;
+    order: 2;
+  }
+
+  html[data-dockle-framework="doxygen"] #nav-path {
+    margin-left: 0 !important;
+  }
+
+  html[data-dockle-framework="doxygen"] #container {
+    display: block !important;
+  }
+
+  html[data-dockle-framework="doxygen"] #page-nav {
+    display: none !important;
+  }
+
+  html[data-dockle-framework="doxygen"] #side-nav {
+    display: none !important;
+  }
+
+  html[data-dockle-framework="doxygen"] #doc-content {
+    margin-right: 0 !important;
+    width: 100% !important;
+  }
+
+  html[data-dockle-framework="doxygen"] div.header .title,
+  html[data-dockle-framework="doxygen"] div.contents {
+    padding: 1rem;
+  }
+
+  html[data-dockle-framework="doxygen"]
+    #doc-content
+    .headertitle
+    > .dockle-page-actions {
+    right: 1rem;
+    top: 1rem;
+  }
+
+  html[data-dockle-framework="doxygen"] div.header .title {
+    padding-right: 7.2rem;
+  }
+}

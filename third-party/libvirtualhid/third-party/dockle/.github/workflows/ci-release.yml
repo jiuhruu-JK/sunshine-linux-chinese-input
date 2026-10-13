@@ -1,0 +1,44 @@
+---
+name: CI-Release
+permissions: {}
+
+on:
+  release:
+    types:
+      - released
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.release.tag_name }}"
+  cancel-in-progress: true
+
+jobs:
+  pypi:
+    name: PyPI
+    if: >-
+      github.event.action == 'released' &&
+      github.repository_owner == 'LizardByte' &&
+      github.event.release.draft == false &&
+      github.event.release.prerelease == false
+    environment:
+      name: pypi
+      url: https://pypi.org/p/lizardbyte-dockle
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Python distributions from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: >-
+          gh release download "${RELEASE_TAG}"
+          --repo "${GITHUB_REPOSITORY}"
+          --dir dist
+          --pattern "lizardbyte_dockle-*.whl"
+          --pattern "lizardbyte_dockle-*.tar.gz"
+
+      - name: Publish Python distributions
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          packages-dir: dist/

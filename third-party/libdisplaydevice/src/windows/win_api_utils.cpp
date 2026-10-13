@@ -1,0 +1,545 @@
+/**
+ * @file src/windows/win_api_utils.cpp
+ * @brief Definitions for lower level Windows API utility functions.
+ */
+// header include
+#include "display_device/windows/win_api_utils.h"
+
+// system includes
+#include <format>
+#include <optional>
+#include <type_traits>
+#include <unordered_set>
+#include <vector>
+
+// local includes
+#include "display_device/logging.h"
+
+namespace {
+  /**
+   * @brief Check if adapter ids are NOT equal.
+   * @param lhs First id to check.
+   * @param rhs Second id to check.
+   * @return True if NOT equal, false otherwise.
+   * @examples
+   * const bool not_equal = (LUID{ 12, 34 }) != (LUID{ 12, 56 });
+   * @examples_end
+   */
+  bool operator!=(const LUID &lhs, const LUID &rhs) {
+    return lhs.HighPart != rhs.HighPart || lhs.LowPart != rhs.LowPart;
+  }
+
+  template<class ModesT>
+  using source_mode_ptr_t = std::conditional_t<std::is_const_v<std::remove_reference_t<ModesT>>, const DISPLAYCONFIG_SOURCE_MODE *, DISPLAYCONFIG_SOURCE_MODE *>;
+
+  /**
+   * @brief Stringify adapter id.
+   * @param id Id to stringify.
+   * @return String representation of the id.
+   * @examples
+   * const bool id_string = to_string({ 12, 34 });
+   * @examples_end
+   */
+  std::string toString(const LUID &id) {
+    return std::format("{}{}", id.HighPart, id.LowPart);
+  }
+
+  template<class ModesT>
+  source_mode_ptr_t<ModesT> getSourceModeImpl(const std::optional<UINT32> &index, ModesT &modes) {
+    if (!index.has_value()) {
+      return nullptr;
+    }
+
+    if (*index >= modes.size()) {
+      DD_LOG(error) << "Source index " << *index << " is out of range " << modes.size();
+      return nullptr;
+    }
+
+    auto &mode {modes[*index]};
+    if (mode.infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) {
+      DD_LOG(error) << "Mode at index " << *index << " is not source mode!";
+      return nullptr;
+    }
+
+    return &mode.sourceMode;
+  }
+
+  /**
+   * @brief Check if the source modes are duplicated (cloned).
+   * @param lhs First mode to check.
+   * @param rhs Second mode to check.
+   * @returns True if both mode have the same origin point, false otherwise.
+   * @note Windows enforces the behaviour that only the duplicate devices can
+   *       have the same origin point as otherwise the configuration is considered invalid by the OS.
+   * @examples
+   * DISPLAYCONFIG_SOURCE_MODE mode_a;
+   * DISPLAYCONFIG_SOURCE_MODE mode_b;
+   * const bool are_duplicated = are_modes_duplicated(mode_a, mode_b);
+   * @examples_end
+   */
+  bool are_modes_duplicated(const DISPLAYCONFIG_SOURCE_MODE &lhs, const DISPLAYCONFIG_SOURCE_MODE &rhs) {
+    return lhs.position.x == rhs.position.x && lhs.position.y == rhs.position.y;
+  }
+}  // namespace
+
+namespace display_device::win_utils {
+  bool isAvailable(const DISPLAYCONFIG_PATH_INFO &path) {
+    return path.targetInfo.targetAvailable == TRUE;
+  }
+
+  bool isActive(const DISPLAYCONFIG_PATH_INFO &path) {
+    return static_cast<bool>(path.flags & DISPLAYCONFIG_PATH_ACTIVE);
+  }
+
+  void setActive(DISPLAYCONFIG_PATH_INFO &path) {
+    path.flags |= DISPLAYCONFIG_PATH_ACTIVE;
+  }
+
+  bool isPrimary(const DISPLAYCONFIG_SOURCE_MODE &mode) {
+    return mode.position.x == 0 && mode.position.y == 0;
+  }
+
+  std::optional<UINT32> getSourceIndex(const DISPLAYCONFIG_PATH_INFO &path, const std::vector<DISPLAYCONFIG_MODE_INFO> &modes) {
+    // The MS docs is not clear when to access the index union struct or not. It appears that union struct is available,
+    // whenever QDC_VIRTUAL_MODE_AWARE is specified when querying (always in our case).
+    //
+    // The docs state, however, that it is only available when DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE flag is set, but
+    // that is just BS (maybe copy-pasta mistake), because some cases were found where the flag is not set and the union
+    // is still being used.
+
+    const UINT32 index {path.sourceInfo.sourceModeInfoIdx};
+    if (index == DISPLAYCONFIG_PATH_SOURCE_MODE_IDX_INVALID) {
+      return std::nullopt;
+    }
+
+    if (index >= modes.size()) {
+      DD_LOG(error) << "Source index " << index << " is out of range " << modes.size();
+      return std::nullopt;
+    }
+
+    return index;
+  }
+
+  void setSourceIndex(DISPLAYCONFIG_PATH_INFO &path, const std::optional<UINT32> &index) {
+    // The MS docs is not clear when to access the index union struct or not. It appears that union struct is available,
+    // whenever QDC_VIRTUAL_MODE_AWARE is specified when querying (always in our case).
+    //
+    // The docs state, however, that it is only available when DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE flag is set, but
+    // that is just BS (maybe copy-pasta mistake), because some cases were found where the flag is not set and the union
+    // is still being used.
+
+    if (index.has_value()) {
+      path.sourceInfo.sourceModeInfoIdx = *index;
+    } else {
+      path.sourceInfo.sourceModeInfoIdx = DISPLAYCONFIG_PATH_SOURCE_MODE_IDX_INVALID;
+    }
+  }
+
+  void setTargetIndex(DISPLAYCONFIG_PATH_INFO &path, const std::optional<UINT32> &index) {
+    // The MS docs is not clear when to access the index union struct or not. It appears that union struct is available,
+    // whenever QDC_VIRTUAL_MODE_AWARE is specified when querying (always in our case).
+    //
+    // The docs state, however, that it is only available when DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE flag is set, but
+    // that is just BS (maybe copy-pasta mistake), because some cases were found where the flag is not set and the union
+    // is still being used.
+
+    if (index.has_value()) {
+      path.targetInfo.targetModeInfoIdx = *index;
+    } else {
+      path.targetInfo.targetModeInfoIdx = DISPLAYCONFIG_PATH_TARGET_MODE_IDX_INVALID;
+    }
+  }
+
+  void setDesktopIndex(DISPLAYCONFIG_PATH_INFO &path, const std::optional<UINT32> &index) {
+    // The MS docs is not clear when to access the index union struct or not. It appears that union struct is available,
+    // whenever QDC_VIRTUAL_MODE_AWARE is specified when querying (always in our case).
+    //
+    // The docs state, however, that it is only available when DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE flag is set, but
+    // that is just BS (maybe copy-pasta mistake), because some cases were found where the flag is not set and the union
+    // is still being used.
+
+    if (index.has_value()) {
+      path.targetInfo.desktopModeInfoIdx = *index;
+    } else {
+      path.targetInfo.desktopModeInfoIdx = DISPLAYCONFIG_PATH_DESKTOP_IMAGE_IDX_INVALID;
+    }
+  }
+
+  void setCloneGroupId(DISPLAYCONFIG_PATH_INFO &path, const std::optional<UINT32> &id) {
+    // The MS docs is not clear when to access the index union struct or not. It appears that union struct is available,
+    // whenever QDC_VIRTUAL_MODE_AWARE is specified when querying (always in our case).
+    //
+    // The docs state, however, that it is only available when DISPLAYCONFIG_PATH_SUPPORT_VIRTUAL_MODE flag is set, but
+    // that is just BS (maybe copy-pasta mistake), because some cases were found where the flag is not set and the union
+    // is still being used.
+
+    if (id.has_value()) {
+      path.sourceInfo.cloneGroupId = *id;
+    } else {
+      path.sourceInfo.cloneGroupId = DISPLAYCONFIG_PATH_CLONE_GROUP_INVALID;
+    }
+  }
+
+  const DISPLAYCONFIG_SOURCE_MODE *getSourceMode(const std::optional<UINT32> &index, const std::vector<DISPLAYCONFIG_MODE_INFO> &modes) {
+    return getSourceModeImpl(index, modes);
+  }
+
+  DISPLAYCONFIG_SOURCE_MODE *getSourceMode(const std::optional<UINT32> &index, std::vector<DISPLAYCONFIG_MODE_INFO> &modes) {
+    return getSourceModeImpl(index, modes);
+  }
+
+  std::optional<ValidatedDeviceInfo> getDeviceInfoForValidPath(const WinApiLayerInterface &w_api, const DISPLAYCONFIG_PATH_INFO &path, const ValidatedPathType type) {
+    if (!isAvailable(path)) {
+      // Could be transient issue according to MSDOCS (no longer available, but still "active")
+      return std::nullopt;
+    }
+
+    if (type == ValidatedPathType::Active && !isActive(path)) {
+      return std::nullopt;
+    }
+
+    const auto device_path {w_api.getMonitorDevicePath(path)};
+    if (device_path.empty()) {
+      return std::nullopt;
+    }
+
+    const auto device_id {w_api.getDeviceId(path)};
+    if (device_id.empty()) {
+      return std::nullopt;
+    }
+
+    if (const auto display_name {w_api.getDisplayName(path)}; display_name.empty()) {
+      return std::nullopt;
+    }
+
+    return ValidatedDeviceInfo {device_path, device_id};
+  }
+
+  const DISPLAYCONFIG_PATH_INFO *getActivePath(const WinApiLayerInterface &w_api, const std::string_view device_id, const std::vector<DISPLAYCONFIG_PATH_INFO> &paths) {
+    for (const auto &path : paths) {
+      const auto device_info {getDeviceInfoForValidPath(w_api, path, ValidatedPathType::Active)};
+      if (!device_info) {
+        continue;
+      }
+
+      if (device_info->m_device_id == device_id) {
+        return &path;
+      }
+    }
+
+    return nullptr;
+  }
+
+  namespace {
+    bool addUniqueDevicePathMapping(const ValidatedDeviceInfo &device_info, StringUnorderedMap<std::string> &paths_to_ids) {
+      if (const auto prev_device_id_for_path_it {paths_to_ids.find(device_info.m_device_path)}; prev_device_id_for_path_it != std::end(paths_to_ids)) {
+        if (prev_device_id_for_path_it->second == device_info.m_device_id) {
+          return true;
+        }
+
+        DD_LOG(error) << "Duplicate display device id found: " << device_info.m_device_id << " (device path: " << device_info.m_device_path << ")";
+        return false;
+      }
+
+      for (const auto &[device_path, device_id] : paths_to_ids) {
+        if (device_id != device_info.m_device_id) {
+          continue;
+        }
+
+        DD_LOG(error) << "Device id " << device_info.m_device_id << " is shared between 2 different paths: " << device_path << " and " << device_info.m_device_path;
+        return false;
+      }
+
+      paths_to_ids[device_info.m_device_path] = device_info.m_device_id;
+      return true;
+    }
+
+    bool updatePathSourceData(const ValidatedDeviceInfo &device_info, const DISPLAYCONFIG_PATH_INFO &path, std::size_t index, PathSourceIndexDataMap &path_data) {
+      auto path_data_it {path_data.find(device_info.m_device_id)};
+      if (path_data_it == std::end(path_data)) {
+        path_data[device_info.m_device_id] = {
+          {{path.sourceInfo.id, index}},
+          path.sourceInfo.adapterId,
+          // Since active paths are always in the front, this is the only time we set it
+          isActive(path) ? std::make_optional(path.sourceInfo.id) : std::nullopt
+        };
+        return true;
+      }
+
+      auto &source_data {path_data_it->second};
+      if (source_data.m_adapter_id != path.sourceInfo.adapterId) {
+        // Sanity check, should not be possible since adapter in embedded in the device path
+        DD_LOG(error) << "Device path " << device_info.m_device_path << " has different adapters!";
+        return false;
+      }
+
+      if (isActive(path)) {
+        // Sanity check, should not be possible as all active paths are in the front
+        DD_LOG(error) << "Device path " << device_info.m_device_path << " is active, but not the first entry in the list!";
+        return false;
+      }
+
+      if (source_data.m_source_id_to_path_index.contains(path.sourceInfo.id)) {
+        // Sanity check, should not be possible unless Windows goes bonkers
+        DD_LOG(error) << "Device path " << device_info.m_device_path << " has duplicate source ids!";
+        return false;
+      }
+
+      source_data.m_source_id_to_path_index[path.sourceInfo.id] = index;
+      return true;
+    }
+  }  // namespace
+
+  PathSourceIndexDataMap collectSourceDataForMatchingPaths(const WinApiLayerInterface &w_api, const std::vector<DISPLAYCONFIG_PATH_INFO> &paths) {
+    PathSourceIndexDataMap path_data;
+
+    StringUnorderedMap<std::string> paths_to_ids;
+    for (std::size_t index = 0; index < paths.size(); ++index) {
+      const auto &path {paths[index]};
+
+      const auto device_info {getDeviceInfoForValidPath(w_api, path, ValidatedPathType::Any)};
+      if (!device_info) {
+        // Path is not valid
+        continue;
+      }
+
+      if (!addUniqueDevicePathMapping(*device_info, paths_to_ids) || !updatePathSourceData(*device_info, path, index, path_data)) {
+        return {};
+      }
+
+      DD_LOG(verbose) << "Device " << device_info->m_device_id << " (active: " << isActive(path) << ") at index " << index << " added to the source data list.";
+    }
+
+    if (path_data.empty()) {
+      DD_LOG(error) << "Failed to collect path source data or none was available!";
+    }
+    return path_data;
+  }
+
+  namespace {
+    using SourceIdSetByAdapter = StringUnorderedMap<std::unordered_set<UINT32>>;
+    using SourceIdByAdapter = StringUnorderedMap<UINT32>;
+
+    struct SelectedSourcePath {
+      std::size_t m_path_index {};
+      UINT32 m_source_id {};
+      bool m_should_mark_source_used {};
+    };
+
+    bool isSourceIdAlreadyUsed(const LUID &adapter_id, UINT32 source_id, const SourceIdSetByAdapter &used_source_ids_per_adapter) {
+      if (const auto entry_it {used_source_ids_per_adapter.find(toString(adapter_id))}; entry_it != std::end(used_source_ids_per_adapter)) {
+        return entry_it->second.contains(source_id);
+      }
+
+      return false;
+    }
+
+    std::optional<UINT32> getUsedSourceIdInGroup(const LUID &adapter_id, const SourceIdByAdapter &used_source_ids_per_adapter_per_group) {
+      const auto entry_it {used_source_ids_per_adapter_per_group.find(toString(adapter_id))};
+      if (entry_it == std::end(used_source_ids_per_adapter_per_group)) {
+        return std::nullopt;
+      }
+
+      return entry_it->second;
+    }
+
+    std::optional<SelectedSourcePath> getPathUsingSourceId(const std::string &device_id, const PathSourceIndexData &source_data, UINT32 source_id) {
+      const auto path_index_it {source_data.m_source_id_to_path_index.find(source_id)};
+      if (path_index_it == std::end(source_data.m_source_id_to_path_index)) {
+        DD_LOG(error) << "Device " << device_id << " does not have a path with a source id " << source_id << "!";
+        return std::nullopt;
+      }
+
+      return SelectedSourcePath {path_index_it->second, source_id, false};
+    }
+
+    std::optional<SelectedSourcePath> getBestUnusedSourcePath(const std::string &device_id, const PathSourceIndexData &source_data, const SourceIdSetByAdapter &used_source_ids_per_adapter) {
+      std::optional<SelectedSourcePath> selected_path;
+      for (const auto [source_id, index] : source_data.m_source_id_to_path_index) {
+        if (isSourceIdAlreadyUsed(source_data.m_adapter_id, source_id, used_source_ids_per_adapter)) {
+          continue;
+        }
+
+        if (!selected_path || index < selected_path->m_path_index) {
+          selected_path = SelectedSourcePath {index, source_id, true};
+        }
+      }
+
+      if (selected_path) {
+        return selected_path;
+      }
+
+      // Apparently nvidia GPU can only render 4 different sources at a time (according to Google).
+      // However, it seems to be true only for physical connections as we also have virtual displays.
+      //
+      // Virtual displays have different adapter ids than the physical connection ones, but GPU still
+      // has to render them, so I don't know how this 4 source limitation makes sense then?
+      //
+      // In short, this arbitrary limitation should not affect virtual displays when the GPU is at its limit.
+      DD_LOG(error) << "Device " << device_id << " cannot be enabled as the adapter has no more free source ids (GPU limitation)!";
+      return std::nullopt;
+    }
+
+    std::optional<SelectedSourcePath> selectSourcePath(
+      const std::string &device_id,
+      const PathSourceIndexData &source_data,
+      const SourceIdSetByAdapter &used_source_ids_per_adapter,
+      const SourceIdByAdapter &used_source_ids_per_adapter_per_group
+    ) {
+      if (const auto already_used_source_id {getUsedSourceIdInGroup(source_data.m_adapter_id, used_source_ids_per_adapter_per_group)}; already_used_source_id.has_value()) {
+        // Some device in the group is already using the source id, and we belong to the same adapter.
+        // This means we must also use the path with matching source id.
+        return getPathUsingSourceId(device_id, source_data, *already_used_source_id);
+      }
+
+      // Here we want to select a path index that has the lowest index (the "best" of paths), but only
+      // if the source id is still free. Technically we should not need to find the lowest index, but that's
+      // what will match the Windows' behaviour the closest if we need to create new topology in the end.
+      return getBestUnusedSourcePath(device_id, source_data, used_source_ids_per_adapter);
+    }
+
+    void markSourcePathUsed(const LUID &adapter_id, UINT32 source_id, SourceIdSetByAdapter &used_source_ids_per_adapter, SourceIdByAdapter &used_source_ids_per_adapter_per_group) {
+      used_source_ids_per_adapter[toString(adapter_id)].insert(source_id);
+      used_source_ids_per_adapter_per_group[toString(adapter_id)] = source_id;
+    }
+
+    std::optional<DISPLAYCONFIG_PATH_INFO> makePathForNewTopologyDevice(
+      const std::string &device_id,
+      UINT32 group_id,
+      const PathSourceIndexDataMap &path_source_data,
+      const std::vector<DISPLAYCONFIG_PATH_INFO> &paths,
+      SourceIdSetByAdapter &used_source_ids_per_adapter,
+      SourceIdByAdapter &used_source_ids_per_adapter_per_group
+    ) {
+      auto path_source_data_it {path_source_data.find(device_id)};
+      if (path_source_data_it == std::end(path_source_data)) {
+        DD_LOG(error) << "Device " << device_id << " does not exist in the available path source data!";
+        return std::nullopt;
+      }
+
+      const auto &source_data {path_source_data_it->second};
+      const auto selected_path {selectSourcePath(device_id, source_data, used_source_ids_per_adapter, used_source_ids_per_adapter_per_group)};
+      if (!selected_path) {
+        return std::nullopt;
+      }
+
+      if (selected_path->m_path_index >= paths.size()) {
+        DD_LOG(error) << "Selected path index " << selected_path->m_path_index << " is out of range! List size: " << paths.size();
+        return std::nullopt;
+      }
+
+      if (selected_path->m_should_mark_source_used) {
+        markSourcePathUsed(source_data.m_adapter_id, selected_path->m_source_id, used_source_ids_per_adapter, used_source_ids_per_adapter_per_group);
+      }
+
+      auto selected_display_path {paths[selected_path->m_path_index]};
+
+      // All the indexes must be cleared and only the group id specified
+      win_utils::setSourceIndex(selected_display_path, std::nullopt);
+      win_utils::setTargetIndex(selected_display_path, std::nullopt);
+      win_utils::setDesktopIndex(selected_display_path, std::nullopt);
+      win_utils::setCloneGroupId(selected_display_path, group_id);
+      win_utils::setActive(selected_display_path);  // We also need to mark it as active...
+
+      return selected_display_path;
+    }
+  }  // namespace
+
+  std::vector<DISPLAYCONFIG_PATH_INFO> makePathsForNewTopology(const ActiveTopology &new_topology, const PathSourceIndexDataMap &path_source_data, const std::vector<DISPLAYCONFIG_PATH_INFO> &paths) {
+    std::vector<DISPLAYCONFIG_PATH_INFO> new_paths;
+
+    UINT32 group_id {0};
+    SourceIdSetByAdapter used_source_ids_per_adapter;
+    for (const auto &group : new_topology) {
+      SourceIdByAdapter used_source_ids_per_adapter_per_group;
+
+      for (const std::string &device_id : group) {
+        const auto selected_path {makePathForNewTopologyDevice(device_id, group_id, path_source_data, paths, used_source_ids_per_adapter, used_source_ids_per_adapter_per_group)};
+        if (!selected_path) {
+          return {};
+        }
+
+        new_paths.push_back(*selected_path);
+      }
+
+      group_id++;
+    }
+
+    if (new_paths.empty()) {
+      DD_LOG(error) << "Failed to make paths for new topology!";
+    }
+    return new_paths;
+  }
+
+  StringSet getAllDeviceIdsAndMatchingDuplicates(const WinApiLayerInterface &w_api, const StringSet &device_ids) {
+    const auto display_data {w_api.queryDisplayConfig(QueryType::Active)};
+    if (!display_data) {
+      // Error already logged
+      return {};
+    }
+
+    StringSet all_device_ids;
+    for (const auto &device_id : device_ids) {
+      if (device_id.empty()) {
+        DD_LOG(error) << "Device it is empty!";
+        return {};
+      }
+
+      const auto provided_path {getActivePath(w_api, device_id, display_data->m_paths)};
+      if (!provided_path) {
+        DD_LOG(warning) << "Failed to find device for " << device_id << "!";
+        return {};
+      }
+
+      const auto provided_path_source_mode {getSourceMode(getSourceIndex(*provided_path, display_data->m_modes), display_data->m_modes)};
+      if (!provided_path_source_mode) {
+        DD_LOG(error) << "Active device does not have a source mode: " << device_id << "!";
+        return {};
+      }
+
+      // We will now iterate over all the active paths (provided path included) and check if
+      // any of them are duplicated.
+      for (const auto &path : display_data->m_paths) {
+        const auto device_info {getDeviceInfoForValidPath(w_api, path, ValidatedPathType::Active)};
+        if (!device_info) {
+          continue;
+        }
+
+        if (all_device_ids.contains(device_info->m_device_id)) {
+          // Already checked
+          continue;
+        }
+
+        const auto source_mode {getSourceMode(getSourceIndex(path, display_data->m_modes), display_data->m_modes)};
+        if (!source_mode) {
+          DD_LOG(error) << "Active device does not have a source mode: " << device_info->m_device_id << "!";
+          return {};
+        }
+
+        if (!are_modes_duplicated(*provided_path_source_mode, *source_mode)) {
+          continue;
+        }
+
+        all_device_ids.insert(device_info->m_device_id);
+      }
+    }
+
+    return all_device_ids;
+  }
+
+  bool fuzzyCompareRefreshRates(const Rational &lhs, const Rational &rhs) {
+    if (lhs.m_denominator > 0 && rhs.m_denominator > 0) {
+      const double lhs_f {static_cast<double>(lhs.m_numerator) / static_cast<double>(lhs.m_denominator)};
+      const double rhs_f {static_cast<double>(rhs.m_numerator) / static_cast<double>(rhs.m_denominator)};
+      return (std::abs(lhs_f - rhs_f) <= 0.9);
+    }
+
+    return false;
+  }
+
+  bool fuzzyCompareModes(const DisplayMode &lhs, const DisplayMode &rhs) {
+    return lhs.m_resolution.m_width == rhs.m_resolution.m_width &&
+           lhs.m_resolution.m_height == rhs.m_resolution.m_height &&
+           fuzzyCompareRefreshRates(lhs.m_refresh_rate, rhs.m_refresh_rate);
+  }
+}  // namespace display_device::win_utils

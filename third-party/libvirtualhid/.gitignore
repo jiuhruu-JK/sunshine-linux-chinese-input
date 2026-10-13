@@ -1,0 +1,21 @@
+# JetBrains IDEs
+.idea/
+
+# Python
+.venv/
+
+# Local macOS signing credentials
+/.env
+
+# CMake
+build/
+cmake-build-*/
+
+# Local temp directories
+.tmp/
+/artifacts/
+/docs/controller-research/
+
+# Dockle
+/.dockle/
+/_site/

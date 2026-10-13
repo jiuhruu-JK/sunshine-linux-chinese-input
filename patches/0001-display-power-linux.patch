@@ -1,0 +1,514 @@
+diff --git a/src/platform/common.h b/src/platform/common.h
+index adb97f3..c3ce5f4 100644
+--- a/src/platform/common.h
++++ b/src/platform/common.h
+@@ -822,6 +822,52 @@ namespace platf {
+   /**
+    * @brief Platform audio controller that manages sinks and microphone capture.
+    */
++  /**
++   * @brief Scoped guard that keeps the display awake while held.
++   *
++   * Destroying the guard releases the platform power assertion. A guard is
++   * always safe to destroy, even when creation failed or the platform is not
++   * supported.
++   */
++  class display_awake_guard_t {
++  public:
++    virtual ~display_awake_guard_t() = default;
++  };
++
++  /**
++   * @brief Platform display power control.
++   *
++   * Streaming hosts must prevent the desktop session from blanking the
++   * displays while a client is connected: a blanked display turns into a
++   * black stream for the remote user and, on Wayland/KMS hosts, can lock the
++   * whole session away from them. Implementations use the platform's standard
++   * power-management interfaces and never change display topology.
++   */
++  class display_power_t {
++  public:
++    /**
++     * @brief Wake the requested display if the platform allows it.
++     *
++     * Best-effort: platforms that cannot wake a display report false and the
++     * caller continues (capture will fail naturally if the display is off).
++     * @param display_name Platform capture selector of the display.
++     * @return True when the wake request was accepted (or already awake).
++     */
++    virtual bool wake_display(const std::string &display_name) = 0;
++
++    /**
++     * @brief Keep all displays awake until the returned guard is destroyed.
++     *
++     * @param reason Short human-readable reason for the power assertion.
++     * @return A guard owning the platform assertion, or nullptr when the
++     * platform cannot inhibit display sleep (caller must not treat this as
++     * fatal).
++     */
++    [[nodiscard]] virtual std::unique_ptr<display_awake_guard_t> keep_awake(const std::string &reason) = 0;
++
++    virtual ~display_power_t() = default;
++  };
++
+   class audio_control_t {
+   public:
+     /**
+@@ -916,6 +962,14 @@ namespace platf {
+    */
+   std::unique_ptr<audio_control_t> audio_control();
+ 
++  /**
++   * @brief Create the platform display power controller.
++   *
++   * @return Platform display power controller, or nullptr when the platform
++   * has no display power management support.
++   */
++  std::unique_ptr<display_power_t> display_power();
++
+   /**
+    * @brief Get the display_t instance for the given hwdevice_type.
+    * If display_name is empty, use the first monitor that's compatible you can find
+diff --git a/src/platform/linux/misc.cpp b/src/platform/linux/misc.cpp
+index babf0a4..a5f1e65 100644
+--- a/src/platform/linux/misc.cpp
++++ b/src/platform/linux/misc.cpp
+@@ -1674,4 +1674,231 @@ namespace platf {
+     }
+ #endif
+   }
++
++  namespace {
++    /**
++     * @brief Guard that owns one session-scoped display-sleep inhibitor.
++     *
++     * The inhibitor is acquired over D-Bus and released either explicitly or
++     * when the guard is destroyed. Closing the D-Bus fd releases the inhibitor
++     * even if the desktop session manager lost the reply, so a crashed host
++     * never leaves the user with a permanently blanking display.
++     */
++    class dbus_inhibit_guard_t: public display_awake_guard_t {
++    public:
++      explicit dbus_inhibit_guard_t(gint32 cookie, GDBusConnection *conn, const char *name, const char *path, const char *iface):
++          cookie_(cookie),
++          conn_(conn) {
++        std::strncpy(name_, name, sizeof(name_) - 1);
++        std::strncpy(path_, path, sizeof(path_) - 1);
++        std::strncpy(iface_, iface, sizeof(iface_) - 1);
++      }
++
++      ~dbus_inhibit_guard_t() override {
++        release();
++      }
++
++      dbus_inhibit_guard_t(const dbus_inhibit_guard_t &) = delete;
++      dbus_inhibit_guard_t &operator=(const dbus_inhibit_guard_t &) = delete;
++
++      void release() {
++        if (!conn_ || cookie_ < 0) {
++          return;
++        }
++        g_autoptr(GError) err = nullptr;
++        g_dbus_connection_call_sync(
++          conn_,
++          name_,
++          path_,
++          iface_,
++          "UnInhibit",
++          g_variant_new("(u)", static_cast<guint32>(cookie_)),
++          nullptr,
++          G_DBUS_CALL_FLAGS_NO_AUTO_START,
++          2000,
++          nullptr,
++          &err
++        );
++        if (err) {
++          BOOST_LOG(debug) << "display power: UnInhibit failed: "sv << err->message;
++        }
++        g_object_unref(conn_);
++        conn_ = nullptr;
++        cookie_ = -1;
++      }
++
++    private:
++      gint32 cookie_ = -1;
++      GDBusConnection *conn_ = nullptr;
++      char name_[128] {};
++      char path_[128] {};
++      char iface_[128] {};
++    };
++
++    /**
++     * @brief Call org.freedesktop.ScreenSaver.Inhibit on the session bus.
++     * @return Cookie (>= 0) on success, -1 on failure.
++     */
++    gint32 screensaver_inhibit(GDBusConnection *conn, const std::string &reason) {
++      g_autoptr(GError) err = nullptr;
++      auto reply = g_dbus_connection_call_sync(
++        conn,
++        "org.freedesktop.ScreenSaver",
++        "/org/freedesktop/ScreenSaver",
++        "org.freedesktop.ScreenSaver",
++        "Inhibit",
++        g_variant_new("(ss)", "sunshine", reason.c_str()),
++        G_VARIANT_TYPE("(u)"),
++        G_DBUS_CALL_FLAGS_NO_AUTO_START,
++        2000,
++        nullptr,
++        &err
++      );
++      if (!reply) {
++        BOOST_LOG(debug) << "display power: ScreenSaver Inhibit unavailable: "sv << err->message;
++        return -1;
++      }
++      gint32 cookie = -1;
++      g_variant_get(reply, "(u)", &cookie);
++      g_variant_unref(reply);
++      return cookie;
++    }
++
++    /**
++     * @brief Call org.freedesktop.ScreenSaver.SimulateUserActivity to wake displays.
++     */
++    bool screensaver_wake(GDBusConnection *conn) {
++      g_autoptr(GError) err = nullptr;
++      g_dbus_connection_call_sync(
++        conn,
++        "org.freedesktop.ScreenSaver",
++        "/org/freedesktop/ScreenSaver",
++        "org.freedesktop.ScreenSaver",
++        "SimulateUserActivity",
++        nullptr,
++        nullptr,
++        G_DBUS_CALL_FLAGS_NO_AUTO_START,
++        2000,
++        nullptr,
++        &err
++      );
++      if (err) {
++        BOOST_LOG(debug) << "display power: SimulateUserActivity unavailable: "sv << err->message;
++        return false;
++      }
++      return true;
++    }
++
++    /**
++     * @brief Take a logind delay-mode inhibitor against idling/suspending.
++     *
++     * This covers sessions where no ScreenSaver service exists: the session
++     * manager must delay blanking (and logind must delay suspend) until the
++     * fd is closed. Closing the fd on guard destruction always releases it.
++     * @return fd (>= 0) on success, -1 on failure.
++     */
++    int logind_inhibit(GDBusConnection *conn, const std::string &reason) {
++      g_autoptr(GError) err = nullptr;
++      auto reply = g_dbus_connection_call_sync(
++        conn,
++        "org.freedesktop.login1",
++        "/org/freedesktop/login1",
++        "org.freedesktop.login1.Manager",
++        "Inhibit",
++        g_variant_new("(ssss)", "idle:sleep", "sunshine", reason.c_str(), "delay"),
++        G_VARIANT_TYPE("(h)"),
++        G_DBUS_CALL_FLAGS_NO_AUTO_START,
++        2000,
++        nullptr,
++        &err
++      );
++      if (!reply) {
++        BOOST_LOG(debug) << "display power: logind Inhibit unavailable: "sv << err->message;
++        return -1;
++      }
++      gint32 fd = -1;
++      g_variant_get(reply, "(h)", &fd);
++      g_variant_unref(reply);
++      return fd;
++    }
++
++    /**
++     * @brief Guard for the logind fd-based inhibitor.
++     */
++    class logind_inhibit_guard_t: public display_awake_guard_t {
++    public:
++      explicit logind_inhibit_guard_t(int fd):
++          fd_(fd) {
++      }
++
++      ~logind_inhibit_guard_t() override {
++        if (fd_ >= 0) {
++          ::close(fd_);
++        }
++      }
++
++      logind_inhibit_guard_t(const logind_inhibit_guard_t &) = delete;
++      logind_inhibit_guard_t &operator=(const logind_inhibit_guard_t &) = delete;
++
++    private:
++      int fd_ = -1;
++    };
++
++    /**
++     * @brief Linux display power control over freedesktop D-Bus interfaces.
++     */
++    class linux_display_power_t: public display_power_t {
++    public:
++      bool wake_display(const std::string &display_name) override {
++        // display_name is not needed for session-level wake: SimulateUserActivity
++        // wakes every display of the session, which is what capture needs.
++        g_autoptr(GError) err = nullptr;
++        GDBusConnection *conn = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &err);
++        if (!conn) {
++          BOOST_LOG(debug) << "display power: no session bus for wake: "sv << err->message;
++          return false;
++        }
++        const bool ok = screensaver_wake(conn);
++        g_object_unref(conn);
++        if (ok) {
++          BOOST_LOG(info) << "display power: wake requested for session displays"sv;
++        }
++        return ok;
++      }
++
++      [[nodiscard]] std::unique_ptr<display_awake_guard_t> keep_awake(const std::string &reason) override {
++        g_autoptr(GError) err = nullptr;
++        GDBusConnection *conn = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &err);
++        if (!conn) {
++          BOOST_LOG(debug) << "display power: no session bus: "sv << err->message;
++          return nullptr;
++        }
++
++        // Primary: desktop session manager inhibitor (GNOME/KDE both implement
++        // org.freedesktop.ScreenSaver; it blocks blanking and screen locking).
++        const gint32 cookie = screensaver_inhibit(conn, reason);
++        if (cookie >= 0) {
++          BOOST_LOG(info) << "display power: session inhibitor acquired (cookie "sv << cookie << ")"sv;
++          return std::make_unique<dbus_inhibit_guard_t>(cookie, conn,
++            "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver");
++        }
++
++        // Fallback: logind delay inhibitor keeps blanking/suspend deferred
++        // while streaming even without a session manager service.
++        const int fd = logind_inhibit(conn, reason);
++        g_object_unref(conn);
++        if (fd >= 0) {
++          BOOST_LOG(info) << "display power: logind idle/sleep inhibitor acquired"sv;
++          return std::make_unique<logind_inhibit_guard_t>(fd);
++        }
++
++        BOOST_LOG(warning) << "display power: unable to inhibit display sleep on this session"sv;
++        return nullptr;
++      }
++    };
++  }  // namespace
++
++  std::unique_ptr<display_power_t> display_power() {
++    return std::make_unique<linux_display_power_t>();
++  }
+ }  // namespace platf
+diff --git a/src/rtsp.cpp b/src/rtsp.cpp
+index 481300d..d41d8cd 100644
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -470,6 +470,10 @@ namespace rtsp_stream {
+    /**
+     * @brief RTSP listener that matches incoming clients to pending launch sessions.
+     */
++  namespace {
++    void display_power_sessions_changed(int count);
++  }  // namespace
++
+    class rtsp_server_t {
+    public:
+      ~rtsp_server_t() {
+@@ -660,21 +668,33 @@ namespace rtsp_stream {
+        }
+      }
+ 
++     int count_after = 0;
+      {
+        auto lg = _session_slots.lock();
+ 
+        for (auto i = _session_slots->begin(); i != _session_slots->end();) {
+          auto &slot = *(*i);
+          if (all || stream::session::state(slot) == stream::session::state_e::STOPPING) {
+            stream::session::stop(slot);
+            stream::session::join(slot);
+ 
+            i = _session_slots->erase(i);
+          } else {
+            i++;
+          }
+        }
++       count_after = (int) _session_slots->size();
+      }
++     // 必须在锁外触发：display_power_sessions_changed 内部会重新进入
++     // session_count()/clear()，锁内触发会造成非递归锁自死锁，
++     // 冻结调用线程（如 nvhttp 的单线程 io_context）。
++     display_power_sessions_changed(count_after);
+    }
+ 
+    /**
+@@ -685,15 +705,25 @@ namespace rtsp_stream {
+ 
+    void clear_by_cert(std::string_view cert) {
++     int count_after = 0;
+      {
+        auto lg = _session_slots.lock();
+        for (auto i = _session_slots->begin(); i != _session_slots->end();) {
+          auto &slot = *(*i);
+          if (stream::session::client_cert(slot) == cert) {
+            stream::session::stop(slot);
+            stream::session::join(slot);
+            i = _session_slots->erase(i);
+          } else {
+            i++;
+          }
+        }
++       count_after = (int) _session_slots->size();
+      }
++     display_power_sessions_changed(count_after);
+    }
+ 
+    /**
+@@ -701,8 +731,13 @@ namespace rtsp_stream {
+      * @param session The session to remove from the set of sessions.
+      */
+    void remove(const std::shared_ptr<stream::session_t> &session) {
+-     auto lg = _session_slots.lock();
+-     _session_slots->erase(session);
++     int count_after = 0;
++     {
++       auto lg = _session_slots.lock();
++       _session_slots->erase(session);
++       count_after = (int) _session_slots->size();
++     }
++     display_power_sessions_changed(count_after);
+    }
+ 
+    /**
+@@ -711,9 +746,14 @@ namespace rtsp_stream {
+    */
+    void insert(const std::shared_ptr<stream::session_t> &session) {
++     int count_after = 0;
+      {
+        auto lg = _session_slots.lock();
+        _session_slots->emplace(session);
+-       BOOST_LOG(info) << "New streaming session started [active sessions: "sv << _session_slots->size() << ']';
++       count_after = (int) _session_slots->size();
++       BOOST_LOG(info) << "New streaming session started [active sessions: "sv << count_after << ']';
++     }
++     display_power_sessions_changed(count_after);
+    }
+ 
+    /**
+    * @brief RTSP listener that matches incoming clients to pending launch sessions.
+    */
++  namespace {
++    void display_power_sessions_changed();
++  }  // namespace
++
+   class rtsp_server_t {
+   public:
+     ~rtsp_server_t() {
+ @@ -666,6 +670,7 @@ namespace rtsp_stream {
+          i++;
+        }
+      }
++      display_power_sessions_changed();
+    }
+ 
+     /**
+@@ -685,6 +690,7 @@ namespace rtsp_stream {
+           i++;
+         }
+       }
++      display_power_sessions_changed();
+     }
+ 
+     /**
+@@ -694,6 +700,7 @@ namespace rtsp_stream {
+     void remove(const std::shared_ptr<stream::session_t> &session) {
+       auto lg = _session_slots.lock();
+       _session_slots->erase(session);
++      display_power_sessions_changed();
+     }
+ 
+     /**
+@@ -704,6 +711,7 @@ namespace rtsp_stream {
+       auto lg = _session_slots.lock();
+       _session_slots->emplace(session);
+       BOOST_LOG(info) << "New streaming session started [active sessions: "sv << _session_slots->size() << ']';
++      display_power_sessions_changed();
+     }
+ 
+     /**
+@@ -740,6 +748,47 @@ namespace rtsp_stream {
+     std::shared_ptr<socket_t> next_socket;
+   };
+ 
++  namespace {
++    /**
++     * @brief Display-awake guard state shared by all streaming sessions.
++     *
++     * While at least one RTSP session is active, the platform display power
++     * controller holds an inhibitor so the session manager cannot blank the
++     * displays (a blanked display is a black stream for the client, and on
++     * Wayland it can lock the user out entirely). The guard is released when
++     * the last session ends. The assertion is owned by this process, so it is
++     * released automatically even on abnormal shutdown.
++     */
++    struct display_power_state_t {
++      std::unique_ptr<platf::display_awake_guard_t> guard;
++    };
++
++    display_power_state_t display_power_state;
++
++    /**
++     * @brief Refresh the display-awake guard after session set changes.
++     *
++     * @param count Current active session count. Callers must pass the value
++     *        taken while they held the session lock; this function must never
++     *        re-enter session_count() (which calls clear() and would deadlock
++     *        on the non-recursive session mutex).
++     */
++    void display_power_sessions_changed(int count) {
++      auto &slot_guard = display_power_state.guard;
++      if (count > 0 && !slot_guard) {
++        auto power = platf::display_power();
++        if (power) {
++          slot_guard = power->keep_awake("Sunshine streaming session");
++          if (slot_guard) {
++            BOOST_LOG(info) << "Display sleep inhibited for streaming session"sv;
++          } else {
++            BOOST_LOG(warning) << "Streaming session active but display sleep could not be inhibited"sv;
++          }
++        }
++      } else if (count == 0 && slot_guard) {
++        slot_guard.reset();
++        BOOST_LOG(info) << "Display sleep inhibition released"sv;
++      }
++    }
++  }  // namespace
++
+   rtsp_server_t server {};  ///< Singleton RTSP server used by GameStream launch sessions.
+ 
+   /**
+diff --git a/src/video.cpp b/src/video.cpp
+index c90847e..eaa82e9 100644
+--- a/src/video.cpp
++++ b/src/video.cpp
+@@ -1484,6 +1484,13 @@ namespace video {
+    * @param config Configuration values to apply.
+    */
+   void reset_display(std::shared_ptr<platf::display_t> &disp, const platf::mem_type_e &type, const std::string &display_name, const config_t &config) {
++    // Wake the display before capture setup: a display that the session
++    // manager just blanked would otherwise fail capture initialization
++    // (and on some Wayland compositors, lock the session entirely).
++    if (auto power = platf::display_power()) {
++      power->wake_display(display_name);
++    }
++
+     // We try this twice, in case we still get an error on reinitialization
+     for (int x = 0; x < 2; ++x) {
+       disp.reset();

@@ -1,0 +1,70 @@
+[project]
+name = "Dockle"
+version = "0.0.0"
+description = "Build documentation with multiple frameworks and one consistent theme."
+repository = "https://github.com/LizardByte/dockle"
+logo = "branding/dockle-logo.svg"
+favicon = "branding/dockle-logo.svg"
+
+[theme]
+primary = "#2962ff"
+content = "#2e3440"
+light_background = "#ffffff"
+dark_background = "#131416"
+
+[build]
+output = "_site"
+work = ".dockle"
+strict = true
+clean = true
+
+[[targets]]
+name = "docs"
+title = "Dockle documentation"
+description = "Configuration, architecture, installation, and distribution guidance."
+framework = "sphinx"
+source = "docs"
+home = true
+
+[targets.sphinx]
+source_edit_link = "https://github.com/LizardByte/dockle/blob/master/docs/{filename}"
+
+[[targets]]
+name = "sphinx"
+title = "Sphinx example"
+description = "Python with matching reStructuredText and Markdown authoring references."
+framework = "sphinx"
+source = ".dockle/example-sources/sphinx"
+
+[targets.sphinx]
+source_edit_link = "https://github.com/LizardByte/dockle/blob/master/examples/sphinx/{filename}"
+
+[[targets]]
+name = "doxygen"
+title = "Doxygen example"
+description = "C++ and Markdown built from a Dockle-generated Doxyfile."
+framework = "doxygen"
+source = ".dockle/example-sources/doxygen"
+entry = "README.md"
+
+[[targets]]
+name = "mkdocs"
+title = "MkDocs example"
+description = "Configuration and Markdown rendered with Dockle's MkDocs theme."
+framework = "mkdocs"
+source = ".dockle/example-sources/mkdocs"
+
+[[targets]]
+name = "jsdoc"
+title = "JSDoc example"
+description = "JavaScript and Markdown built from Dockle-generated JSDoc configuration."
+framework = "jsdoc"
+source = ".dockle/example-sources/jsdoc"
+entry = "README.md"
+
+[[targets]]
+name = "rustdoc"
+title = "rustdoc example"
+description = "Rust and Markdown built through Cargo and normalized by Dockle."
+framework = "rustdoc"
+source = ".dockle/example-sources/rustdoc"

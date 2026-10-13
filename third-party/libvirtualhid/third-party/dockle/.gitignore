@@ -1,0 +1,33 @@
+# JetBrains IDEs
+.idea/
+
+# Dockle
+.dockle/
+_site/
+
+# Node.js
+.npm-cache/
+.npm-tmp/
+node_modules/
+
+# Generated from pinned Node.js dependencies
+src/dockle/sphinx/themes/dockle/static/HIGHLIGHT_LICENSE.txt
+src/dockle/sphinx/themes/dockle/static/LUCIDE_LICENSE.txt
+src/dockle/sphinx/themes/dockle/static/highlight.min.js
+src/dockle/sphinx/themes/dockle/static/lucide.min.js
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Test and tooling caches
+.coverage
+coverage/
+junit-python.xml
+junit.xml
+.pytest_cache/
+.ruff_cache/

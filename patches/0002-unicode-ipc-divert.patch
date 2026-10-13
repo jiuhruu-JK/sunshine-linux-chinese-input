@@ -1,0 +1,134 @@
+diff --git a/src/platform/linux/uhid_backend.cpp b/src/platform/linux/uhid_backend.cpp
+index 7c24f41..a05f5f2 100644
+--- a/src/platform/linux/uhid_backend.cpp
++++ b/src/platform/linux/uhid_backend.cpp
+@@ -40,6 +40,10 @@
+ #ifndef __user
+   #define __user
+ #endif
++#include <sys/stat.h>
++#include <sys/time.h>
++#include <sys/un.h>
++#include <cstdlib>
+ #include <linux/input.h>
+ #include <linux/uinput.h>
+ #if defined(__linux__)
+@@ -923,8 +927,118 @@ namespace lvh::detail {
+       return OperationStatus::success();
+     }
+ 
++    // ----- sunshine-input IPC (sunshine 输入法 MVP) -----
++    // 把整段 UTF-8 文本发给 fcitx5 sunshineinput 扩展，由它经
++    // InputContext::commitString() 标准文字提交接口上屏。
++    // 协议：4 字节大端长度前缀 + UTF-8 正文；回应 1 字节 'K'(成功)/'E'(失败)。
++    // 任何失败都回退到原有的 Ctrl+Shift+U hex 合成路径。
++    constexpr const char *kSunshineInputSocketEnv = "SUNSHINE_INPUT_SOCKET";
++    constexpr std::chrono::milliseconds kSunshineInputTimeout {500};
++
++    std::string sunshine_input_socket_path() {
++      if (const char *env = std::getenv(kSunshineInputSocketEnv); env && *env) {
++        return env;
++      }
++      if (const char *runtime_dir = std::getenv("XDG_RUNTIME_DIR"); runtime_dir && *runtime_dir) {
++        return std::string(runtime_dir) + "/sunshine-input/sunshine-input.sock";
++      }
++      return {};
++    }
++
++    bool read_exact(int fd, void *buf, size_t len) {
++      auto *dst = static_cast<char *>(buf);
++      size_t got = 0;
++      while (got < len) {
++        ssize_t n = ::recv(fd, dst + got, len - got, 0);
++        if (n == 0) {
++          return false;
++        }
++        if (n < 0) {
++          if (errno == EINTR) {
++            continue;
++          }
++          return false;
++        }
++        got += static_cast<size_t>(n);
++      }
++      return true;
++    }
++
++    bool write_all(int fd, const char *data, size_t len) {
++      size_t sent = 0;
++      while (sent < len) {
++        ssize_t n = ::send(fd, data + sent, len - sent, MSG_NOSIGNAL);
++        if (n < 0) {
++          if (errno == EINTR) {
++            continue;
++          }
++          return false;
++        }
++        sent += static_cast<size_t>(n);
++      }
++      return true;
++    }
++
++    bool sunshine_input_commit(std::string_view text) {
++      const auto path = sunshine_input_socket_path();
++      if (path.empty() || path.size() >= sizeof(sockaddr_un::sun_path)) {
++        return false;
++      }
++
++      const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
++      if (fd < 0) {
++        return false;
++      }
++
++      // 套接字不存在（扩展没跑）直接失败，不重试不等待。
++      struct ::stat st {};
++      if (::stat(path.c_str(), &st) != 0) {
++        ::close(fd);
++        return false;
++      }
++
++      sockaddr_un addr {};
++      addr.sun_family = AF_UNIX;
++      std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
++      if (::connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
++        ::close(fd);
++        return false;
++      }
++
++      // 阻塞读回执，靠 SO_RCVTIMEO 限界，防止拖住输入线程。
++      timeval tv {};
++      tv.tv_sec = std::chrono::duration_cast<std::chrono::seconds>(kSunshineInputTimeout).count();
++      tv.tv_usec = 0;
++      ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
++      ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
++
++      const auto len = static_cast<std::uint32_t>(text.size());
++      const unsigned char header[4] = {
++        static_cast<unsigned char>(len >> 24),
++        static_cast<unsigned char>(len >> 16),
++        static_cast<unsigned char>(len >> 8),
++        static_cast<unsigned char>(len)
++      };
++      bool ok = write_all(fd, reinterpret_cast<const char *>(header), sizeof(header)) &&
++                write_all(fd, text.data(), text.size());
++      char reply = 0;
++      if (ok && read_exact(fd, &reply, 1)) {
++        ok = (reply == 'K');
++      } else {
++        ok = false;
++      }
++      ::close(fd);
++      return ok;
++    }
++
+     template<class SubmitKeyEvent>
+     OperationStatus type_text_with_unicode_hex(std::string_view text, SubmitKeyEvent submit_key_event) {
++      // 新路径：经输入法标准提交接口上屏（KDE Wayland / GNOME / Chrome 全兼容）。
++      // 扩展未运行、无聚焦窗口或提交被拒时回退到下面的 hex 合成路径。
++      if (sunshine_input_commit(text)) {
++        return OperationStatus::success();
++      }
++      // IPC 不可用（扩展未运行/无聚焦/被拒），回退到下面的 hex 合成路径。
+       static constexpr std::array<KeyboardEvent, 6> unicode_hex_prefix {{
+         {.key_code = 0xA2, .pressed = true},
+         {.key_code = 0xA0, .pressed = true},

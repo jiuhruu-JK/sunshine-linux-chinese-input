@@ -1,0 +1,5 @@
+[submodule "third-party/highlight.js"]
+	path = third-party/highlight.js
+	url = https://github.com/highlightjs/highlight.js.git
+	branch = main
+	shallow = true

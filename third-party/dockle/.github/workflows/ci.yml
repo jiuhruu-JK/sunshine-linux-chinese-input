@@ -1,0 +1,549 @@
+---
+name: CI
+permissions: {}
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  PYTHON_VERSION: '3.14'
+
+jobs:
+  release-setup:
+    name: Release Setup
+    outputs:
+      publish_release: ${{ steps.release-setup.outputs.publish_release }}
+      release_body: ${{ steps.release-setup.outputs.release_body }}
+      release_commit: ${{ steps.release-setup.outputs.release_commit }}
+      release_generate_release_notes: ${{ steps.release-setup.outputs.release_generate_release_notes }}
+      release_tag: ${{ steps.release-setup.outputs.release_tag }}
+      release_version: ${{ steps.release-setup.outputs.release_version }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Release Setup
+        id: release-setup
+        uses: LizardByte/actions/actions/release_setup@28374bf43cc8b6ee88b9b8a3419b2ac7a6573906  # v2026.928.123224
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  pytest:
+    name: Pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - '3.11'
+          - '3.14'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build third-party browser assets
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Sync test dependencies
+        shell: bash
+        env:
+          UV_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: |
+          uv_sync_args=(
+            --locked
+            --no-default-groups
+            --group test
+            --all-extras
+            --no-install-project
+          )
+          # uv.lock pins external artifacts; watchdog must build where no compatible wheel exists.
+          uv sync "${uv_sync_args[@]}"  # NOSONAR(githubactions:S8541)
+
+      - name: Build package wheel for tests
+        run: uv build --wheel --out-dir build-test-package
+
+      - name: Install package wheel for tests
+        if: runner.os != 'Windows'
+        # The wheel is built from this checkout; --no-deps prevents unlocked dependency installation.
+        run: uv pip install --no-deps --no-build build-test-package/*.whl  # NOSONAR(githubactions:S8544)
+
+      - name: Install package wheel for tests on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem build-test-package -Filter *.whl -File
+          if ($wheel.Count -ne 1) {
+            throw "Expected one package wheel; found $($wheel.Count)"
+          }
+          uv pip install --no-deps --no-build $wheel.FullName
+
+      - name: Smoke test installed wheel
+        shell: bash
+        run: |
+          uv run --locked --no-default-groups --group test --all-extras \
+            --no-build --no-sync python -I -c \
+            "import dockle; print(dockle.__version__)"
+          uv run --locked --no-default-groups --group test --all-extras \
+            --no-build --no-sync python -I -c \
+            "from pathlib import Path; import dockle; "\
+            "assert (Path(dockle.__file__).parent / 'jsdoc_template' / 'publish.js').is_file()"
+          uv run --locked --no-default-groups --group test --all-extras \
+            --no-build --no-sync dockle cmake-dir
+
+      - name: Test with pytest
+        id: test
+        shell: bash
+        run: |
+          uv_run_args=(
+            --locked
+            --no-default-groups
+            --group test
+            --all-extras
+            --no-sync
+          )
+          # The locked environment is synchronized above; --no-sync prevents installs during this command.
+          uv run "${uv_run_args[@]}" pytest  # NOSONAR(githubactions:S8541)
+
+      - name: Upload test coverage
+        if: >-
+          always() &&
+          (steps.test.outcome == 'success' || steps.test.outcome == 'failure') &&
+          startsWith(github.repository, 'LizardByte/')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: ./coverage/python-coverage.xml
+          flags: ${{ runner.os }}-python-${{ matrix.python-version }}
+          report_type: coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
+      - name: Upload test results
+        if: >-
+          always() &&
+          (steps.test.outcome == 'success' || steps.test.outcome == 'failure') &&
+          startsWith(github.repository, 'LizardByte/')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: ./junit-python.xml
+          flags: ${{ runner.os }}-python-${{ matrix.python-version }}
+          report_type: test_results
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
+  python-package:
+    name: Python package
+    needs:
+      - release-setup
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build third-party browser assets
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Set package version
+        run: uv version --no-sync "${{ needs.release-setup.outputs.release_version }}"
+
+      - name: Sync packaging dependencies
+        env:
+          UV_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: uv sync --locked --only-group package --no-build
+
+      - name: Build Python distributions
+        run: uv build
+
+      - name: Check Python distributions
+        run: uv run --locked --only-group package --no-build --no-sync twine check dist/*
+
+      - name: Upload Python distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          if-no-files-found: error
+          name: release-python
+          path: dist/*
+          retention-days: 30
+
+  node-package:
+    name: Node package
+    permissions:
+      contents: write  # required for release_setup action
+    uses: LizardByte/.github/.github/workflows/__call-ci-node.yml@master
+    with:
+      create_release: false
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  standalone:
+    name: Standalone (${{ matrix.artifact }})
+    needs:
+      - release-setup
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: windows-amd64
+            executable: dockle.exe
+            os: windows-latest
+          - artifact: windows-arm64
+            executable: dockle.exe
+            os: windows-11-arm
+          - artifact: linux-x86_64
+            executable: dockle
+            os: ubuntu-latest
+          - artifact: linux-arm64
+            executable: dockle
+            os: ubuntu-24.04-arm
+          - artifact: macos-arm64
+            executable: dockle
+            os: macos-latest
+          - artifact: macos-x86_64
+            executable: dockle
+            os: macos-26-intel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build third-party browser assets
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Install Apple signing certificate
+        if: >-
+          runner.os == 'macOS' &&
+          needs.release-setup.outputs.publish_release == 'true'
+        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466  # v7.0.0
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD }}
+
+      - name: Set up Python
+        id: setup-python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Set package version
+        run: uv version --no-sync "${{ needs.release-setup.outputs.release_version }}"
+
+      - name: Sync standalone dependencies
+        shell: bash
+        env:
+          UV_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: |
+          uv_sync_args=(
+            --locked
+            --no-default-groups
+            --group package
+            --all-extras
+            --no-install-project
+          )
+          # uv.lock pins external artifacts; source builds keep the standalone matrix portable across architectures.
+          uv sync "${uv_sync_args[@]}"  # NOSONAR(githubactions:S8541)
+
+      - name: Build package wheel for standalone executable
+        run: uv build --wheel --out-dir build-package
+
+      - name: Install package wheel
+        if: runner.os != 'Windows'
+        # The wheel is built from this checkout; --no-deps prevents unlocked dependency installation.
+        run: uv pip install --no-deps --no-build build-package/*.whl  # NOSONAR(githubactions:S8544)
+
+      - name: Install package wheel on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem build-package -Filter *.whl -File
+          if ($wheel.Count -ne 1) {
+            throw "Expected one package wheel; found $($wheel.Count)"
+          }
+          uv pip install --no-deps --no-build $wheel.FullName
+
+      - name: Build standalone executable
+        shell: bash
+        env:
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          PUBLISH_RELEASE: ${{ needs.release-setup.outputs.publish_release }}
+        run: |
+          pyinstaller_args=(
+            --clean
+            --collect-all markdown
+            --collect-all mkdocs
+            --collect-all myst_parser
+            --collect-all sphinx
+            --collect-all dockle
+            --copy-metadata lizardbyte-dockle
+            --copy-metadata mkdocs
+            --copy-metadata Sphinx
+            --name dockle
+            --noconfirm
+            --onefile
+            --specpath build
+          )
+
+          if [[ "${RUNNER_OS}" == "macOS" && \
+                "${PUBLISH_RELEASE}" == "true" ]]; then
+            pyinstaller_args+=(
+              --codesign-identity "${APPLE_CODESIGN_IDENTITY}"
+            )
+          fi
+
+          uv run --locked --no-default-groups --group package \
+            --no-build --no-sync pyinstaller \
+            "${pyinstaller_args[@]}" \
+            src/dockle/__main__.py
+
+      - name: Verify macOS signature
+        if: >-
+          runner.os == 'macOS' &&
+          needs.release-setup.outputs.publish_release == 'true'
+        run: codesign --verify --strict --verbose=2 dist/dockle
+
+      - name: Smoke test standalone executable
+        if: runner.os != 'Windows'
+        env:
+          EXPECTED_VERSION: ${{ needs.release-setup.outputs.release_version }}
+        run: |
+          actual_version="$(./dist/${{ matrix.executable }} --version)"
+          test "${actual_version}" = "dockle ${EXPECTED_VERSION}"
+
+      - name: Smoke test standalone executable on Windows
+        if: runner.os == 'Windows'
+        env:
+          EXPECTED_VERSION: ${{ needs.release-setup.outputs.release_version }}
+        shell: pwsh
+        run: |
+          $actualVersion = .\dist\${{ matrix.executable }} --version
+          if ($actualVersion -ne "dockle $env:EXPECTED_VERSION") {
+            throw "Unexpected version: $actualVersion"
+          }
+
+      - name: Smoke test bundled Python adapters
+        shell: bash
+        run: ./dist/${{ matrix.executable }} build sphinx mkdocs
+
+      - name: Notarize macOS executable
+        if: >-
+          runner.os == 'macOS' &&
+          needs.release-setup.outputs.publish_release == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARYTOOL_PASSWORD: ${{ secrets.APPLE_NOTARYTOOL_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent dist/dockle dist/dockle-notarization.zip
+          submission=$(xcrun notarytool submit dist/dockle-notarization.zip \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_NOTARYTOOL_PASSWORD}" \
+            --wait \
+            --timeout 30m \
+            --output-format json)
+          echo "${submission}"
+          status=$(jq -r '.status' <<< "${submission}")
+          if [[ "${status}" != "Accepted" ]]; then
+            submission_id=$(jq -r '.id' <<< "${submission}")
+            xcrun notarytool log "${submission_id}" \
+              --apple-id "${APPLE_ID}" \
+              --team-id "${APPLE_TEAM_ID}" \
+              --password "${APPLE_NOTARYTOOL_PASSWORD}"
+            exit 1
+          fi
+          rm dist/dockle-notarization.zip
+
+      - name: Upload Windows executable for signing
+        if: >-
+          runner.os == 'Windows' &&
+          needs.release-setup.outputs.publish_release == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          if-no-files-found: error
+          name: build-standalone-${{ matrix.artifact }}
+          path: dist/${{ matrix.executable }}
+          retention-days: 1
+
+      - name: Package standalone executable
+        if: runner.os != 'Windows'
+        run: >-
+          tar -czf "dist/dockle-${{ matrix.artifact }}.tar.gz"
+          -C dist dockle
+
+      - name: Upload standalone executable
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          archive: false
+          if-no-files-found: error
+          path: dist/dockle-${{ matrix.artifact }}.tar.gz
+          retention-days: 30
+
+  windows-sign:
+    name: Sign Windows (${{ matrix.artifact }})
+    if: needs.release-setup.outputs.publish_release == 'true'
+    needs:
+      - release-setup
+      - standalone
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        artifact:
+          - windows-amd64
+          - windows-arm64
+    steps:
+      - name: Download Windows executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: build-standalone-${{ matrix.artifact }}
+          path: dist
+
+      - name: Sign Windows executable
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+        with:
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          files: ${{ github.workspace }}\dist\dockle.exe
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+
+      - name: Verify Windows signature
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature .\dist\dockle.exe
+          if ($signature.Status -ne 'Valid') {
+            throw "Unexpected Authenticode status: $($signature.Status)"
+          }
+
+      - name: Package Windows executable
+        shell: pwsh
+        run: >-
+          Compress-Archive
+          -LiteralPath .\dist\dockle.exe
+          -DestinationPath ".\dist\dockle-${{ matrix.artifact }}.zip"
+
+      - name: Upload standalone executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          archive: false
+          if-no-files-found: error
+          path: dist/dockle-${{ matrix.artifact }}.zip
+          retention-days: 30
+
+  create-release:
+    name: Create Release
+    if: needs.release-setup.outputs.publish_release == 'true'
+    needs:
+      - node-package
+      - python-package
+      - pytest
+      - release-setup
+      - standalone
+      - windows-sign
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Python distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: release-python
+          path: release-assets
+
+      - name: Download standalone archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          merge-multiple: true
+          path: release-assets
+          pattern: dockle-*
+          skip-decompress: true
+
+      - name: Create/Update GitHub Release
+        uses: LizardByte/actions/actions/release_create@28374bf43cc8b6ee88b9b8a3419b2ac7a6573906  # v2026.928.123224
+        with:
+          allowUpdates: true
+          artifacts: '${{ github.workspace }}/release-assets/*'
+          body: ${{ needs.release-setup.outputs.release_body }}
+          draft: true
+          generateReleaseNotes: ${{ needs.release-setup.outputs.release_generate_release_notes }}
+          name: ${{ needs.release-setup.outputs.release_tag }}
+          prerelease: true
+          tag: ${{ needs.release-setup.outputs.release_tag }}
+          token: ${{ secrets.GH_BOT_TOKEN }}
+          virustotal_api_key: ${{ secrets.VIRUSTOTAL_API_KEY }}

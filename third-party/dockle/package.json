@@ -1,0 +1,73 @@
+{
+  "name": "@lizardbyte/dockle",
+  "version": "0.0.0",
+  "description": "Dockle's native JSDoc template and JavaScript documentation builder.",
+  "author": "LizardByte",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LizardByte/dockle.git"
+  },
+  "homepage": "https://dockle.readthedocs.io/",
+  "bugs": {
+    "url": "https://github.com/LizardByte/dockle/issues"
+  },
+  "funding": "https://app.lizardbyte.dev",
+  "keywords": [
+    "documentation",
+    "dockle",
+    "jsdoc",
+    "template",
+    "theme"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "publish.js",
+  "exports": {
+    ".": "./publish.js"
+  },
+  "bin": {
+    "dockle-jsdoc": "bin/dockle-jsdoc.cjs"
+  },
+  "files": [
+    "bin/",
+    "src/dockle/jsdoc_template/",
+    "src/dockle/sphinx/themes/dockle/static/dockle.css",
+    "src/dockle/sphinx/themes/dockle/static/dockle.js",
+    "src/dockle/sphinx/themes/dockle/static/highlight.min.js",
+    "src/dockle/sphinx/themes/dockle/static/HIGHLIGHT_LICENSE.txt",
+    "src/dockle/sphinx/themes/dockle/static/LUCIDE_LICENSE.txt",
+    "src/dockle/sphinx/themes/dockle/static/lucide.min.js",
+    "LICENSE",
+    "publish.js",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prebuild": "git submodule update --init --depth 1 -- third-party/highlight.js",
+    "build": "npm run sync:highlighter && npm run sync:lucide && npm run stage:examples",
+    "prepack": "npm run build",
+    "pretest": "npm run build",
+    "sync:highlighter": "node scripts/sync-highlighter.mjs",
+    "stage:examples": "node scripts/stage-examples.mjs",
+    "sync:lucide": "node scripts/sync-lucide.mjs",
+    "test": "npm run test:unit && npm run test:lint",
+    "test:lint": "eslint publish.js eslint.config.mjs bin scripts src/dockle/jsdoc_template src/dockle/sphinx/themes/dockle/static/dockle.js tests-js",
+    "test:unit": "c8 --all --include=publish.js --include=bin/*.cjs --include=src/dockle/jsdoc_template/*.js --reporter=json --reporter=text node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=junit.xml tests-js/jsdoc-template.test.mjs",
+    "test:package": "npm pack --dry-run"
+  },
+  "dependencies": {
+    "jsdoc": "4.0.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@highlightjs/cdn-assets": "11.12.0",
+    "c8": "12.0.0",
+    "eslint": "10.12.0",
+    "globals": "17.13.0",
+    "lucide": "1.52.0"
+  }
+}

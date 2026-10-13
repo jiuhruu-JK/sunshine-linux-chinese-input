@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-dockle-framework="{{FRAMEWORK}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="readthedocs-addons-api-version" content="1">
+  <title>Search — {{PROJECT}}</title>
+  {{FAVICON_LINK}}
+  <link rel="stylesheet" href="{{ASSETS}}dockle.css" data-dockle-theme="{{FRAMEWORK}}">
+  <script defer src="{{ASSETS}}lucide.min.js" data-dockle-lucide></script>
+  <script defer src="{{ASSETS}}dockle.js" data-dockle-script></script>
+</head>
+<body>
+  <div class="dockle-toolbar">
+    <form class="dockle-search dockle-universal-search" data-dockle-universal-search
+          data-dockle-logo-url="{{LOGO}}"
+          action="dockle-search.html" method="get" role="search">
+      <label class="visually-hidden" for="dockle-search-input">Search documentation</label>
+      <input id="dockle-search-input" type="search" name="q" required
+             placeholder="Search documentation" autocomplete="off"
+             data-dockle-search="{{INDEX}}" data-dockle-root=".">
+      <button class="dockle-search-submit" type="submit" aria-label="Search documentation"
+              title="Search documentation"><i data-lucide="search" aria-hidden="true"></i></button>
+      <ul class="dockle-search-results" data-dockle-search-results="dockle-search-input"
+          aria-live="polite" hidden></ul>
+    </form>
+  </div>
+  <div class="dockle-shell">
+    <aside class="dockle-sidebar" id="dockle-sidebar" aria-label="Primary navigation">
+      <div class="dockle-brand"><a href="index.html">{{PROJECT}}</a></div>
+      <nav class="dockle-tree" aria-label="Documentation">
+        <ul><li><a href="index.html">Documentation</a></li></ul>
+      </nav>
+    </aside>
+    <div class="dockle-page">
+      <header class="dockle-mobile-header">
+        <button type="button" data-dockle-menu-toggle aria-controls="dockle-sidebar" aria-expanded="false">
+          <i data-lucide="menu" aria-hidden="true"></i><span class="visually-hidden">Menu</span>
+        </button>
+        <a href="index.html">{{PROJECT}}</a>
+      </header>
+      <main class="dockle-main dockle-search-main">
+        <article class="dockle-article">
+          <div class="dockle-page-actions" aria-label="Page actions">
+            <button type="button" class="dockle-theme-toggle"
+                    data-dockle-theme-toggle aria-label="Color scheme: auto">
+              <i data-lucide="sun-moon" aria-hidden="true"></i>
+            </button>
+          </div>
+          <h1>Search results</h1>
+          <p data-dockle-search-summary aria-live="polite"></p>
+          <ol class="dockle-search-page-results" data-dockle-search-page></ol>
+        </article>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

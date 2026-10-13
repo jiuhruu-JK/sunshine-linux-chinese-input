@@ -1,0 +1,97 @@
+<?js
+const dockle = env.conf.templates.dockle || {};
+const safe = (value) => this.htmlsafe(String(value || ''));
+const pageTitle = title === 'Home' ? dockle.targetTitle : title;
+const repositoryUrl = String(dockle.repositoryUrl || '');
+const normalizedRepositoryUrl = repositoryUrl.toLowerCase();
+const repositoryService = normalizedRepositoryUrl.includes('github')
+  ? 'github'
+  : normalizedRepositoryUrl.includes('gitlab') ? 'gitlab' : 'generic';
+?>
+<!doctype html>
+<html lang="en" data-dockle-framework="jsdoc">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="readthedocs-addons-api-version" content="1">
+  <meta name="generator" content="JSDoc <?js= safe(env.version.number) ?> with Dockle <?js= safe(dockle.dockleVersion) ?>">
+  <title><?js= safe(pageTitle) ?></title>
+  <?js if (dockle.faviconFile) { ?>
+  <link rel="icon" href="<?js= safe(dockle.faviconFile) ?>" data-dockle-favicon>
+  <?js } ?>
+  <script src="scripts/prettify/prettify.js"></script>
+  <script src="scripts/prettify/lang-css.js"></script>
+  <link rel="stylesheet" href="styles/prettify-tomorrow.css">
+  <link rel="stylesheet" href="styles/jsdoc-default.css">
+  <link rel="stylesheet" href="dockle.css" data-dockle-theme="jsdoc">
+  <script defer src="lucide.min.js" data-dockle-lucide></script>
+  <script defer src="highlight.min.js" data-dockle-highlight></script>
+  <script defer src="dockle.js" data-dockle-script></script>
+</head>
+<body>
+  <a class="dockle-compat-brand" href="<?js= safe(dockle.projectUrl) ?>" data-dockle-brand>
+    <strong><?js= safe(dockle.projectName) ?></strong>
+    <?js if (dockle.projectVersion) { ?><span><?js= safe(dockle.projectVersion) ?></span><?js } ?>
+  </a>
+  <div class="dockle-toolbar">
+    <form class="dockle-search dockle-universal-search"
+         data-dockle-universal-search
+         data-dockle-logo-url="<?js= safe(dockle.logoFile) ?>"
+         data-dockle-target-title="<?js= safe(dockle.targetTitle) ?>"
+         action="dockle-search.html" method="get" role="search">
+      <label class="visually-hidden" for="dockle-search-input">Search documentation</label>
+      <input id="dockle-search-input" type="search" name="q" required
+             placeholder="Search documentation" autocomplete="off"
+             data-dockle-search="search.json" data-dockle-root=".">
+      <button class="dockle-search-submit" type="submit" aria-label="Search documentation"
+              title="Search documentation"><i data-lucide="search" aria-hidden="true"></i></button>
+      <ul class="dockle-search-results"
+          data-dockle-search-results="dockle-search-input"
+          aria-live="polite" hidden></ul>
+    </form>
+  </div>
+
+  <div id="main">
+    <div class="dockle-page-actions" aria-label="Page actions"
+         data-dockle-repository-action>
+      <?js if (repositoryUrl) { ?>
+      <a class="dockle-page-action dockle-repository-link" href="<?js= safe(repositoryUrl) ?>"
+         target="_blank" rel="noopener noreferrer" title="Source repository">
+        <?js if (repositoryService === 'github') { ?>
+        <svg class="dockle-repository-icon" data-dockle-repository-service="github"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path>
+        </svg>
+        <?js } else if (repositoryService === 'gitlab') { ?>
+        <svg class="dockle-repository-icon" data-dockle-repository-service="gitlab"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8633 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8633 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z"></path>
+        </svg>
+        <?js } else { ?>
+        <i data-lucide="git-fork" data-dockle-repository-service="generic" aria-hidden="true"></i>
+        <?js } ?>
+        <span class="visually-hidden">Source repository</span>
+      </a>
+      <?js } ?>
+      <button type="button" class="dockle-theme-toggle"
+              data-dockle-theme-toggle aria-label="Color scheme: auto">
+        <i data-lucide="sun-moon" aria-hidden="true"></i>
+      </button>
+    </div>
+    <?js if (title !== 'Home') { ?><h1 class="page-title"><?js= safe(title) ?></h1><?js } ?>
+    <?js= content ?>
+    <footer class="dockle-footer dockle-built-with" data-dockle-built-with>
+      Generated by <a href="https://github.com/LizardByte/dockle">Dockle <?js= safe(dockle.dockleVersion) ?><i data-lucide="external-link" aria-hidden="true"></i></a>
+      with <a href="https://jsdoc.app/">JSDoc <?js= safe(env.version.number) ?><i data-lucide="external-link" aria-hidden="true"></i></a>.
+    </footer>
+  </div>
+
+  <nav><?js= this.nav ?></nav>
+  <script>
+    document.querySelectorAll("pre.prettyprint:not(.source.linenums)")
+      .forEach((block) => block.classList.remove("prettyprint", "source"));
+    prettyPrint();
+  </script>
+  <script src="scripts/linenumber.js"></script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+#
+# Project configuration
+#
+cmake_minimum_required(VERSION 3.24)
+if(POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)
+endif()
+project(libvirtualhid VERSION 0.0.0
+        DESCRIPTION "Cross-platform virtual HID device library."
+        HOMEPAGE_URL "https://app.lizardbyte.dev"
+        LANGUAGES CXX)
+
+set(PROJECT_LICENSE "MIT")
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(LIBVIRTUALHID_IS_TOP_LEVEL OFF)
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(LIBVIRTUALHID_IS_TOP_LEVEL ON)
+endif()
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "Setting build type to 'Release' as none was specified.")
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING
+        "Choose the type of build." FORCE)
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_version.cmake")
+
+#
+# Project optional configuration
+#
+option(BUILD_DOCS "Build documentation" ${LIBVIRTUALHID_IS_TOP_LEVEL})
+option(BUILD_TESTS "Build tests" ${LIBVIRTUALHID_IS_TOP_LEVEL})
+option(BUILD_EXAMPLES "Build examples" ${LIBVIRTUALHID_IS_TOP_LEVEL})
+option(LIBVIRTUALHID_BUILD_TOOLS "Build libvirtualhid diagnostic tools" ${LIBVIRTUALHID_IS_TOP_LEVEL})
+option(LIBVIRTUALHID_TOOLS_STATIC_RUNTIME "Link libvirtualhid tools to static compiler runtimes where supported" ON)
+option(LIBVIRTUALHID_TOOLS_FULLY_STATIC "Attempt to link libvirtualhid tools as fully static binaries" OFF)
+option(LIBVIRTUALHID_TOOLS_STATIC_SDL3 "Prefer a static SDL3 diagnostic UI dependency when available" ON)
+option(LIBVIRTUALHID_ENABLE_XTEST "Enable X11/XTest keyboard and mouse fallback on evdev platforms" ON)
+option(LIBVIRTUALHID_BUILD_WINDOWS_DRIVER "Build the Windows UMDF2 driver package with the WDK/MSVC toolchain" OFF)
+option(LIBVIRTUALHID_BUILD_WINDOWS_BROKER
+       "Build the Windows broker service used by the monetized UMDF driver package"
+       ${LIBVIRTUALHID_BUILD_WINDOWS_DRIVER})
+option(LIBVIRTUALHID_BUILD_MACOS_BROKER
+       "Build the licensed macOS virtual HID broker"
+       ${APPLE})
+option(LIBVIRTUALHID_INSTALL
+        "Install libvirtualhid targets, headers, and CMake package files" ${LIBVIRTUALHID_IS_TOP_LEVEL})
+option(LIBVIRTUALHID_ENABLE_PACKAGING "Enable CPack package metadata" ${LIBVIRTUALHID_INSTALL})
+option(LIBVIRTUALHID_WARNINGS_AS_ERRORS "Treat libvirtualhid warnings as errors" ${LIBVIRTUALHID_IS_TOP_LEVEL})
+
+set(CMAKE_COLOR_MAKEFILE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
+set(LIBVIRTUALHID_USES_THREADS OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    set(LIBVIRTUALHID_USES_THREADS ON)
+endif()
+set(LIBVIRTUALHID_USES_XTEST OFF)
+
+set(LIBVIRTUALHID_USES_LIZARDBYTE_COMMON OFF)
+if(WIN32 AND LIBVIRTUALHID_BUILD_WINDOWS_BROKER)
+    set(LIBVIRTUALHID_USES_LIZARDBYTE_COMMON ON)
+endif()
+
+if(LIBVIRTUALHID_USES_LIZARDBYTE_COMMON OR BUILD_TESTS)
+    set(LIZARDBYTE_COMMON_BUILD_TEST_SUPPORT
+        ${BUILD_TESTS}
+        CACHE BOOL "Build lizardbyte-common GoogleTest support helpers" FORCE)
+    set(LIZARDBYTE_COMMON_INSTALL
+        OFF
+        CACHE BOOL "Install lizardbyte-common targets and package configuration" FORCE)
+    if(NOT TARGET lizardbyte::common)
+        add_subdirectory(third-party/lizardbyte-common)
+    endif()
+    if(MSVC AND LIBVIRTUALHID_BUILD_WINDOWS_DRIVER)
+        set_property(TARGET lizardbyte_common PROPERTY
+          MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        if(TARGET lizardbyte_common_test_support)
+            set_property(TARGET lizardbyte_common_test_support PROPERTY
+              MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif()
+    endif()
+endif()
+
+# Copy MinGW runtime DLLs beside a target when using GNU toolchains on Windows.
+function(libvirtualhid_copy_mingw_runtime target_name)
+    if(NOT WIN32 OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        return()
+    endif()
+
+    get_filename_component(lvh_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    foreach(lvh_runtime_dll IN ITEMS
+            libgcc_s_seh-1.dll
+            libstdc++-6.dll
+            libwinpthread-1.dll)
+        set(lvh_runtime_path "${lvh_compiler_dir}/${lvh_runtime_dll}")
+        if(EXISTS "${lvh_runtime_path}")
+            add_custom_command(TARGET "${target_name}" POST_BUILD
+                               COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                                       "${lvh_runtime_path}"
+                                       "$<TARGET_FILE_DIR:${target_name}>"
+                               COMMENT "Copying MinGW runtime ${lvh_runtime_dll}")
+        endif()
+    endforeach()
+endfunction()
+
+# Production library code is located here. Coverage is confined to tests/.
+add_subdirectory(src)
+
+#
+# Examples, tests, and docs are top-level only
+#
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    if(WIN32 AND LIBVIRTUALHID_BUILD_WINDOWS_DRIVER)
+        add_subdirectory(src/platform/windows/driver)
+    endif()
+
+    if(WIN32 AND LIBVIRTUALHID_BUILD_WINDOWS_BROKER)
+        add_subdirectory(src/platform/windows/broker)
+    endif()
+
+    if(APPLE AND LIBVIRTUALHID_BUILD_MACOS_BROKER)
+        enable_language(OBJCXX)
+        add_subdirectory(src/platform/macos/broker)
+    endif()
+
+    if(BUILD_DOCS)
+        include(third-party/dockle/cmake/Dockle.cmake)
+        dockle_add_docs(docs TARGETS api)
+    endif()
+
+    if(BUILD_EXAMPLES)
+        add_subdirectory(examples)
+    endif()
+
+    if(LIBVIRTUALHID_BUILD_TOOLS)
+        add_subdirectory(tools)
+    endif()
+
+    if(BUILD_TESTS)
+        enable_testing()
+        add_subdirectory(tests)
+    endif()
+endif()
+
+#
+# Package config
+#
+if(LIBVIRTUALHID_INSTALL)
+    set(LIBVIRTUALHID_CONFIG_DEPENDENCIES "")
+    if(LIBVIRTUALHID_USES_THREADS)
+        string(APPEND LIBVIRTUALHID_CONFIG_DEPENDENCIES
+          "find_dependency(Threads)\n"
+          "find_dependency(PkgConfig)\n"
+          "pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)\n")
+    endif()
+    if(LIBVIRTUALHID_USES_XTEST)
+        string(APPEND LIBVIRTUALHID_CONFIG_DEPENDENCIES
+          "find_dependency(X11 COMPONENTS Xtst)\n")
+    endif()
+
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSES/MIT.md"
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/libvirtualhid"
+      RENAME LICENSE
+      COMPONENT library)
+
+    configure_package_config_file(
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/libvirtualhid-config.cmake.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/libvirtualhid-config.cmake"
+      INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libvirtualhid")
+
+    write_basic_package_version_file(
+      "${CMAKE_CURRENT_BINARY_DIR}/libvirtualhid-config-version.cmake"
+      VERSION ${PROJECT_VERSION}
+      COMPATIBILITY SameMajorVersion)
+
+    install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/libvirtualhid-config.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/libvirtualhid-config-version.cmake"
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libvirtualhid")
+endif()
+
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME
+   AND LIBVIRTUALHID_ENABLE_PACKAGING
+   AND LIBVIRTUALHID_INSTALL)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/packaging/common.cmake")
+endif()

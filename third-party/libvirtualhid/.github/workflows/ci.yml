@@ -1,0 +1,181 @@
+---
+name: CI
+permissions: {}
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.14'
+
+jobs:
+  setup_release:
+    name: Setup Release
+    outputs:
+      python_version: ${{ steps.ci_versions.outputs.python_version }}
+      publish_release: ${{ steps.setup_release.outputs.publish_release }}
+      release_body: ${{ steps.setup_release.outputs.release_body }}
+      release_commit: ${{ steps.setup_release.outputs.release_commit }}
+      release_generate_release_notes: ${{ steps.setup_release.outputs.release_generate_release_notes }}
+      release_tag: ${{ steps.setup_release.outputs.release_tag }}
+      release_version: ${{ steps.setup_release.outputs.release_version }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Export CI versions
+        id: ci_versions
+        run: echo "python_version=${PYTHON_VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Release
+        id: setup_release
+        uses: LizardByte/actions/actions/release_setup@28374bf43cc8b6ee88b9b8a3419b2ac7a6573906  # v2026.928.123224
+        with:
+          dotnet: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  driver:
+    name: Windows Driver
+    needs: setup_release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-driver.yml
+    with:
+      azure_signing_account: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      azure_signing_cert_profile: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+      azure_signing_endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      publish_release: ${{ needs.setup_release.outputs.publish_release }}
+      release_commit: ${{ needs.setup_release.outputs.release_commit }}
+      release_version: ${{ needs.setup_release.outputs.release_version }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+  macos_broker:
+    name: macOS Broker
+    needs: setup_release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-macos-broker.yml
+    with:
+      publish_release: ${{ needs.setup_release.outputs.publish_release }}
+      release_version: ${{ needs.setup_release.outputs.release_version }}
+    secrets:
+      APPLE_ID: ${{ github.event_name == 'push' && secrets.APPLE_ID || '' }}
+      APPLE_TEAM_ID: ${{ github.event_name == 'push' && secrets.APPLE_TEAM_ID || '' }}
+      APPLE_NOTARYTOOL_PASSWORD: ${{ github.event_name == 'push' && secrets.APPLE_NOTARYTOOL_PASSWORD || '' }}
+      APPLE_CODESIGN_IDENTITY: ${{ github.event_name == 'push' && secrets.APPLE_CODESIGN_IDENTITY || '' }}
+      APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64: >-
+        ${{ github.event_name == 'push' && secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 || '' }}
+      APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD: >-
+        ${{ github.event_name == 'push' && secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_P12_PASSWORD || '' }}
+      APPLE_MACOS_VIRTUAL_HID_PROVISIONING_PROFILE_BASE64: >-
+        ${{ github.event_name == 'push' && secrets.APPLE_MACOS_VIRTUAL_HID_PROVISIONING_PROFILE_BASE64 || '' }}
+
+  build:
+    name: Library
+    needs:
+      - driver
+      - setup_release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-build.yml
+    with:
+      python_version: ${{ needs.setup_release.outputs.python_version }}
+      release_commit: ${{ needs.setup_release.outputs.release_commit }}
+      release_version: ${{ needs.setup_release.outputs.release_version }}
+
+  powershell:
+    name: PowerShell
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-powershell.yml
+
+  results:
+    name: Coverage and Test Results
+    if: >-
+      always() &&
+      (needs.build.result == 'success' || needs.build.result == 'failure') &&
+      (needs.powershell.result == 'success' || needs.powershell.result == 'failure') &&
+      startsWith(github.repository, 'LizardByte/')
+    needs:
+      - build
+      - powershell
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-results.yml
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  release:
+    name: Release
+    if: >-
+      always() &&
+      needs.setup_release.outputs.publish_release == 'true' &&
+      needs.build.result == 'success' &&
+      needs.driver.result == 'success' &&
+      needs.macos_broker.result == 'success' &&
+      startsWith(github.repository, 'LizardByte/')
+    needs:
+      - build
+      - driver
+      - macos_broker
+      - setup_release
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows driver installer artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: windows-driver-installer
+          path: windows-driver-installer
+
+      - name: Download macOS disk image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: macos-virtual-hid-installer
+          path: macos-virtual-hid-installer
+
+      - name: Prepare release artifact
+        run: |
+          mkdir -p artifacts
+          cp windows-driver-installer/*.msi artifacts/
+          cp macos-virtual-hid-installer/*.dmg artifacts/
+
+      - name: Validate release metadata
+        env:
+          RELEASE_COMMIT: ${{ needs.setup_release.outputs.release_commit }}
+          RELEASE_TAG: ${{ needs.setup_release.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.setup_release.outputs.release_version }}
+        run: |
+          test -n "${RELEASE_TAG}"
+          test -n "${RELEASE_VERSION}"
+          test "${RELEASE_COMMIT}" = "${GITHUB_SHA}"
+          test -s "artifacts/libvirtualhid-Windows-AMD64-driver-installer.msi"
+          test -s "artifacts/libvirtualhid-macOS-universal.dmg"
+
+      - name: Create/Update GitHub Release
+        if: needs.setup_release.outputs.publish_release == 'true'
+        uses: LizardByte/actions/actions/release_create@28374bf43cc8b6ee88b9b8a3419b2ac7a6573906  # v2026.928.123224
+        with:
+          allowUpdates: false
+          body: ${{ needs.setup_release.outputs.release_body }}
+          draft: false
+          generateReleaseNotes: ${{ needs.setup_release.outputs.release_generate_release_notes }}
+          name: ${{ needs.setup_release.outputs.release_tag }}
+          prerelease: true
+          tag: ${{ needs.setup_release.outputs.release_tag }}
+          token: ${{ secrets.GH_BOT_TOKEN }}
+          virustotal_api_key: ${{ secrets.VIRUSTOTAL_API_KEY }}

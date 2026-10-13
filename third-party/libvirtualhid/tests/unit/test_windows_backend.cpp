@@ -1,0 +1,462 @@
+/**
+ * @file tests/unit/test_windows_backend.cpp
+ * @brief Unit tests for the Windows backend control-channel integration.
+ */
+
+#ifndef DOXYGEN
+  #if defined(WINVER) && WINVER < 0x0A00
+    #undef WINVER
+  #endif
+  #ifndef WINVER
+    #define WINVER 0x0A00
+  #endif
+  #if defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0A00
+    #undef _WIN32_WINNT
+  #endif
+  #ifndef _WIN32_WINNT
+    #define _WIN32_WINNT 0x0A00
+  #endif
+  #if defined(NTDDI_VERSION) && NTDDI_VERSION < 0x0A000006
+    #undef NTDDI_VERSION
+  #endif
+  #ifndef NTDDI_VERSION
+    #define NTDDI_VERSION 0x0A000006
+  #endif
+#endif
+
+// local includes
+#include "fixtures/fixtures.hpp"
+#include "fixtures/windows_backend_test_hooks.hpp"
+#include "lvh_windows_protocol.h"
+
+// lib includes
+#include <libvirtualhid/profiles.hpp>
+
+// standard includes
+#include <algorithm>
+#include <vector>
+
+#ifndef NOMINMAX
+  #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+#endif
+
+// platform includes
+#include <Windows.h>
+
+namespace {
+
+  class WindowsBackendTest: public WindowsTest {};
+
+  void expect_ok(const lvh::OperationStatus &status) {
+    EXPECT_TRUE(status.ok()) << status.message();
+  }
+
+  std::int16_t mouse_report_i16(const std::vector<std::uint8_t> &report, std::size_t offset) {
+    return static_cast<std::int16_t>(
+      static_cast<std::uint16_t>(report[offset]) |
+      (static_cast<std::uint16_t>(report[offset + 1U]) << 8U)
+    );
+  }
+
+  template<typename Predicate>
+  const lvh::detail::test::WindowsSyntheticPointerRecord *find_synthetic_pointer(
+    const std::vector<lvh::detail::test::WindowsSyntheticPointerRecord> &records,
+    Predicate predicate
+  ) {
+    const auto position = std::find_if(records.begin(), records.end(), predicate);
+    return position == records.end() ? nullptr : &*position;
+  }
+
+}  // namespace
+
+TEST_F(WindowsBackendTest, FakeChannelExercisesLifecycleSubmitCloseAndOutput) {
+  const auto result = lvh::detail::test::windows_backend_fake_channel_lifecycle();
+
+  EXPECT_EQ(result.capabilities.backend_name, "windows-umdf");
+  EXPECT_TRUE(result.capabilities.requires_installed_driver);
+  EXPECT_TRUE(result.capabilities.supports_virtual_hid);
+  EXPECT_TRUE(result.capabilities.supports_gamepad);
+  EXPECT_TRUE(result.capabilities.supports_keyboard);
+  EXPECT_TRUE(result.capabilities.supports_mouse);
+  EXPECT_TRUE(result.capabilities.supports_output_reports);
+
+  ASSERT_TRUE(result.create_status.ok()) << result.create_status.message();
+  ASSERT_TRUE(result.submit_status.ok()) << result.submit_status.message();
+  ASSERT_TRUE(result.close_status.ok()) << result.close_status.message();
+  EXPECT_TRUE(result.second_close_status.ok());
+  EXPECT_EQ(result.submit_after_close_status.code(), lvh::ErrorCode::device_closed);
+
+  ASSERT_EQ(result.device_nodes.size(), 1U);
+  EXPECT_EQ(result.device_nodes.front().kind, lvh::DeviceNodeKind::other);
+  EXPECT_EQ(result.device_nodes.front().path, R"(\\.\LibVirtualHid#100)");
+
+  EXPECT_EQ(result.create_requests, 1U);
+  EXPECT_EQ(result.submit_requests, 1U);
+  EXPECT_EQ(result.destroy_requests, 1U);
+
+  ASSERT_TRUE(result.saw_output);
+  EXPECT_EQ(result.last_output.kind, lvh::GamepadOutputKind::rumble);
+  EXPECT_EQ(result.last_output.low_frequency_rumble, 49151U);
+  EXPECT_EQ(result.last_output.high_frequency_rumble, 65535U);
+  ASSERT_EQ(result.last_output.raw_report.size(), 8U);
+  EXPECT_EQ(result.last_output.raw_report[0], 0x03U);
+}
+
+TEST_F(WindowsBackendTest, SwitchReportsStreamAtTheNativeCadence) {
+  const auto result = lvh::detail::test::windows_backend_switch_report_stream();
+
+  expect_ok(result.create_status);
+  expect_ok(result.submit_status);
+  ASSERT_TRUE(result.repeated_report);
+  expect_ok(result.close_status);
+  ASSERT_GE(result.submitted_reports.size(), 2U);
+  EXPECT_TRUE(std::ranges::all_of(result.submitted_reports, [&result](const auto &report) {
+    return report == result.expected_report;
+  }));
+}
+
+TEST_F(WindowsBackendTest, XboxReportsOnlySubmitShoulderStateTransitions) {
+  for (const auto kind : {lvh::GamepadProfileKind::xbox_one, lvh::GamepadProfileKind::xbox_series}) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    const auto result = lvh::detail::test::windows_backend_xbox_input_deduplication(kind);
+
+    expect_ok(result.create_status);
+    expect_ok(result.left_shoulder_status);
+    expect_ok(result.repeated_left_shoulder_status);
+    expect_ok(result.right_shoulder_status);
+    expect_ok(result.repeated_right_shoulder_status);
+    expect_ok(result.release_status);
+    expect_ok(result.close_status);
+    ASSERT_EQ(result.submitted_reports.size(), 3U);
+    EXPECT_EQ(result.submitted_reports[0][12], 0x10U);
+    EXPECT_EQ(result.submitted_reports[1][12], 0x20U);
+    EXPECT_EQ(result.submitted_reports[2][12], 0U);
+  }
+}
+
+TEST_F(WindowsBackendTest, PlayStationDefaultsUseEffectiveUsbProfiles) {
+  const auto result = lvh::detail::test::windows_backend_playstation_transport();
+  const auto dualshock4_usb = lvh::profiles::dualshock4_usb();
+  const auto dualsense_usb = lvh::profiles::dualsense_usb();
+
+  ASSERT_TRUE(result.dualshock4_status.ok()) << result.dualshock4_status.message();
+  EXPECT_EQ(result.dualshock4_effective_profile.bus_type, lvh::BusType::usb);
+  EXPECT_EQ(result.dualshock4_effective_profile.report_descriptor, dualshock4_usb.report_descriptor);
+  EXPECT_EQ(result.dualshock4_effective_profile.input_report_size, dualshock4_usb.input_report_size);
+  EXPECT_EQ(result.dualshock4_effective_profile.output_report_size, dualshock4_usb.output_report_size);
+
+  ASSERT_TRUE(result.dualsense_status.ok()) << result.dualsense_status.message();
+  EXPECT_EQ(result.dualsense_effective_profile.bus_type, lvh::BusType::usb);
+  EXPECT_EQ(result.dualsense_effective_profile.report_descriptor, dualsense_usb.report_descriptor);
+  EXPECT_EQ(result.dualsense_effective_profile.input_report_size, dualsense_usb.input_report_size);
+  EXPECT_EQ(result.dualsense_effective_profile.output_report_size, dualsense_usb.output_report_size);
+}
+
+TEST_F(WindowsBackendTest, HidMousePreservesIdentityChunksInputAndUsesNarrowFallback) {
+  const auto result = lvh::detail::test::windows_backend_hid_mouse();
+
+  expect_ok(result.operations.create_status);
+  EXPECT_EQ(result.device.device_type, LVH_WINDOWS_DEVICE_MOUSE);
+  EXPECT_EQ(result.device.bus_type, LVH_WINDOWS_BUS_BLUETOOTH);
+  EXPECT_EQ(result.device.flags, 0U);
+  EXPECT_EQ(result.device.vendor_id, 0x1234U);
+  EXPECT_EQ(result.device.product_id, 0x5678U);
+  EXPECT_EQ(result.device.version, 0x4321U);
+  EXPECT_EQ(result.device.report_id, 0U);
+  EXPECT_EQ(result.device.input_report_size, LVH_WINDOWS_MOUSE_INPUT_REPORT_SIZE);
+  EXPECT_EQ(result.device.output_report_size, 0U);
+  EXPECT_EQ(result.device.name, "Configured mouse");
+  EXPECT_EQ(result.device.manufacturer, "Configured manufacturer");
+  EXPECT_EQ(result.device.stable_id, "configured-mouse");
+
+  expect_ok(result.operations.motion_status);
+  expect_ok(result.operations.large_scroll_status);
+  expect_ok(result.operations.partial_scroll_status);
+  expect_ok(result.operations.completed_scroll_status);
+  expect_ok(result.operations.close_status);
+  ASSERT_EQ(result.observations.reports.size(), 6U);
+  for (const auto &report : result.observations.reports) {
+    EXPECT_EQ(report.size(), LVH_WINDOWS_MOUSE_INPUT_REPORT_SIZE);
+  }
+  EXPECT_EQ(mouse_report_i16(result.observations.reports[0], 1U), 32767);
+  EXPECT_EQ(mouse_report_i16(result.observations.reports[0], 3U), -32768);
+  EXPECT_EQ(mouse_report_i16(result.observations.reports[1], 1U), 32767);
+  EXPECT_EQ(mouse_report_i16(result.observations.reports[1], 3U), -32768);
+  EXPECT_EQ(mouse_report_i16(result.observations.reports[2], 1U), 4466);
+  EXPECT_EQ(mouse_report_i16(result.observations.reports[2], 3U), -4464);
+  EXPECT_EQ(static_cast<std::int8_t>(result.observations.reports[3][5]), 127);
+  EXPECT_EQ(static_cast<std::int8_t>(result.observations.reports[4][5]), 5);
+  EXPECT_EQ(static_cast<std::int8_t>(result.observations.reports[5][6]), 1);
+  EXPECT_EQ(result.observations.destroy_requests, 1U);
+
+  EXPECT_EQ(result.operations.protocol_failure_status.code(), lvh::ErrorCode::backend_failure);
+  expect_ok(result.operations.license_fallback_create_status);
+  expect_ok(result.operations.license_fallback_submit_status);
+  EXPECT_EQ(result.observations.license_create_requests, 1U);
+  EXPECT_EQ(result.observations.license_fallback_send_inputs, 1U);
+}
+
+TEST_F(WindowsBackendTest, HidKeyboardPreservesIdentityTracksStateAndUsesNarrowFallback) {
+  const auto result = lvh::detail::test::windows_backend_hid_keyboard();
+
+  expect_ok(result.operations.create_status);
+  EXPECT_EQ(result.device.device_type, LVH_WINDOWS_DEVICE_KEYBOARD);
+  EXPECT_EQ(result.device.bus_type, LVH_WINDOWS_BUS_USB);
+  EXPECT_EQ(result.device.flags, 0U);
+  EXPECT_EQ(result.device.vendor_id, 0x1234U);
+  EXPECT_EQ(result.device.product_id, 0x5678U);
+  EXPECT_EQ(result.device.version, 0x4321U);
+  EXPECT_EQ(result.device.report_id, 0U);
+  EXPECT_EQ(result.device.input_report_size, LVH_WINDOWS_KEYBOARD_INPUT_REPORT_SIZE);
+  EXPECT_EQ(result.device.output_report_size, LVH_WINDOWS_KEYBOARD_OUTPUT_REPORT_SIZE);
+  EXPECT_EQ(result.device.name, "Configured keyboard");
+  EXPECT_EQ(result.device.manufacturer, "Configured manufacturer");
+  EXPECT_EQ(result.device.stable_id, "configured-keyboard");
+
+  expect_ok(result.operations.letter_press_status);
+  expect_ok(result.operations.modifier_press_status);
+  expect_ok(result.operations.extended_press_status);
+  expect_ok(result.operations.letter_release_status);
+  expect_ok(result.operations.enter_press_status);
+  expect_ok(result.operations.enter_release_status);
+  expect_ok(result.operations.keypad_enter_press_status);
+  expect_ok(result.operations.keypad_enter_release_status);
+  expect_ok(result.operations.unmapped_submit_status);
+  expect_ok(result.operations.text_status);
+  expect_ok(result.operations.close_status);
+  ASSERT_EQ(result.observations.reports.size(), 8U);
+  for (const auto &report : result.observations.reports) {
+    EXPECT_EQ(report.size(), LVH_WINDOWS_KEYBOARD_INPUT_REPORT_SIZE);
+  }
+  EXPECT_EQ(result.observations.reports[0][0], 0U);
+  EXPECT_EQ(result.observations.reports[0][2], 0x04U);
+  EXPECT_EQ(result.observations.reports[1][0], 0x02U);
+  EXPECT_EQ(result.observations.reports[1][2], 0x04U);
+  EXPECT_EQ(result.observations.reports[2][0], 0x02U);
+  EXPECT_EQ(result.observations.reports[2][2], 0x04U);
+  EXPECT_EQ(result.observations.reports[2][3], 0x4FU);
+  EXPECT_EQ(result.observations.reports[3][0], 0x02U);
+  EXPECT_EQ(result.observations.reports[3][2], 0x4FU);
+  EXPECT_EQ(result.observations.reports[4][2], 0x28U);
+  EXPECT_EQ(result.observations.reports[4][3], 0x4FU);
+  EXPECT_EQ(result.observations.reports[5][2], 0x4FU);
+  EXPECT_EQ(result.observations.reports[6][2], 0x4FU);
+  EXPECT_EQ(result.observations.reports[6][3], 0x58U);
+  EXPECT_EQ(result.observations.reports[7][2], 0x4FU);
+  EXPECT_EQ(result.observations.destroy_requests, 1U);
+  EXPECT_EQ(result.observations.fallback_send_inputs, 3U);
+
+  EXPECT_EQ(result.operations.protocol_failure_status.code(), lvh::ErrorCode::backend_failure);
+  expect_ok(result.operations.license_fallback_create_status);
+  expect_ok(result.operations.license_fallback_submit_status);
+  EXPECT_EQ(result.observations.license_create_requests, 1U);
+  EXPECT_EQ(result.observations.license_fallback_send_inputs, 1U);
+}
+
+TEST_F(WindowsBackendTest, GenericPidTimerCannotDeliverStaleStopAfterNewStart) {
+  const auto result = lvh::detail::test::windows_backend_generic_pid_callback_ordering();
+
+  ASSERT_TRUE(result.completed);
+  ASSERT_GE(result.strengths.size(), 3U);
+  EXPECT_GT(result.strengths[0], 0U);
+  EXPECT_EQ(result.strengths[1], 0U);
+  EXPECT_GT(result.strengths[2], 0U);
+}
+
+TEST_F(WindowsBackendTest, FakeChannelCoversCreateFailureBranches) {
+  const auto result = lvh::detail::test::windows_backend_fake_channel_failures();
+
+  EXPECT_EQ(result.invalid_argument_status.code(), lvh::ErrorCode::invalid_argument);
+  EXPECT_EQ(result.unsupported_profile_status.code(), lvh::ErrorCode::unsupported_profile);
+  EXPECT_EQ(result.device_closed_status.code(), lvh::ErrorCode::device_closed);
+  EXPECT_EQ(result.backend_failure_status.code(), lvh::ErrorCode::backend_failure);
+  EXPECT_EQ(result.transport_failure_status.code(), lvh::ErrorCode::backend_failure);
+  EXPECT_EQ(result.unavailable_status.code(), lvh::ErrorCode::backend_unavailable);
+  EXPECT_TRUE(result.xbox_360_create_status.ok()) << result.xbox_360_create_status.message();
+  EXPECT_EQ(result.oversized_descriptor_status.code(), lvh::ErrorCode::invalid_argument);
+  EXPECT_EQ(result.oversized_input_report_status.code(), lvh::ErrorCode::invalid_argument);
+  EXPECT_EQ(result.oversized_output_report_status.code(), lvh::ErrorCode::invalid_argument);
+
+  ASSERT_TRUE(result.empty_nodes_create_status.ok()) << result.empty_nodes_create_status.message();
+  EXPECT_TRUE(result.empty_device_nodes.empty());
+  EXPECT_EQ(result.oversized_submit_status.code(), lvh::ErrorCode::invalid_argument);
+}
+
+TEST_F(WindowsBackendTest, UtilityHookCoversEnvironmentErrorAndThreadBranches) {
+  const auto result = lvh::detail::test::windows_backend_fake_channel_utilities();
+
+  ASSERT_GE(result.default_device_paths.size(), 2U);
+  EXPECT_EQ(result.default_device_paths[result.default_device_paths.size() - 2U], R"(\\.\LibVirtualHid)");
+  EXPECT_EQ(result.default_device_paths[result.default_device_paths.size() - 1U], R"(\\.\Global\LibVirtualHid)");
+  ASSERT_EQ(result.custom_device_paths.size(), 1U);
+  EXPECT_EQ(result.custom_device_paths[0], R"(\\.\LibVirtualHid-Test)");
+  EXPECT_EQ(result.formatted_error_status.code(), lvh::ErrorCode::backend_failure);
+  EXPECT_EQ(result.fallback_error_status.code(), lvh::ErrorCode::backend_failure);
+  EXPECT_NE(result.formatted_error_status.message().find("format known Windows error:"), std::string::npos);
+  EXPECT_NE(
+    result.fallback_error_status.message().find("format unknown Windows error: Windows error 3758096385"),
+    std::string::npos
+  );
+  EXPECT_TRUE(result.keyboard_create_status.ok()) << result.keyboard_create_status.message();
+  EXPECT_TRUE(result.keyboard_close_status.ok()) << result.keyboard_close_status.message();
+  EXPECT_EQ(result.keyboard_submit_after_close_status.code(), lvh::ErrorCode::device_closed);
+  EXPECT_TRUE(result.mouse_create_status.ok()) << result.mouse_create_status.message();
+  EXPECT_TRUE(result.mouse_close_status.ok()) << result.mouse_close_status.message();
+  EXPECT_EQ(result.mouse_submit_after_close_status.code(), lvh::ErrorCode::device_closed);
+  EXPECT_FALSE(result.timeout_result);
+}
+
+TEST_F(WindowsBackendTest, OverlappedDeviceIoUsesAnEventAndWaitsForPendingCompletion) {
+  const auto result = lvh::detail::test::windows_backend_overlapped_device_io();
+
+  expect_ok(result.immediate_status);
+  EXPECT_TRUE(result.immediate_saw_event);
+  EXPECT_FALSE(result.immediate_called_completion);
+  EXPECT_EQ(result.immediate_bytes_returned, 7U);
+
+  expect_ok(result.pending_status);
+  EXPECT_TRUE(result.pending_saw_event);
+  EXPECT_TRUE(result.pending_waited);
+  EXPECT_EQ(result.pending_bytes_returned, 11U);
+
+  EXPECT_TRUE(result.cancellation_called);
+  EXPECT_TRUE(result.cancellation_drained_after_cancel);
+  EXPECT_TRUE(result.cancellation_waited);
+
+  EXPECT_EQ(result.start_failure_status.code(), lvh::ErrorCode::backend_failure);
+  EXPECT_EQ(result.completion_failure_status.code(), lvh::ErrorCode::backend_failure);
+}
+
+TEST_F(WindowsBackendTest, SendInputDevicesTranslateKeyboardMouseFailuresAndUnsupportedProfiles) {
+  const auto result = lvh::detail::test::windows_backend_send_input_devices();
+
+  expect_ok(result.keyboard.down_status);
+  expect_ok(result.keyboard.up_status);
+  expect_ok(result.keyboard.text_status);
+  expect_ok(result.keyboard.empty_text_status);
+  EXPECT_EQ(result.keyboard.invalid_text_status.code(), lvh::ErrorCode::invalid_argument);
+  EXPECT_EQ(result.keyboard.failure_status.code(), lvh::ErrorCode::backend_failure);
+  expect_ok(result.keyboard.normalized_status);
+  EXPECT_EQ(result.keyboard.normalized_input.type, INPUT_KEYBOARD);
+  EXPECT_EQ(result.keyboard.normalized_input.virtual_key, 0U);
+  EXPECT_EQ(result.keyboard.normalized_input.scan_code, 30U);
+  EXPECT_EQ(result.keyboard.normalized_input.key_flags, KEYEVENTF_SCANCODE);
+  expect_ok(result.keyboard.enter_status);
+  expect_ok(result.keyboard.keypad_enter_status);
+  EXPECT_EQ(result.keyboard.enter_input.scan_code, 0x1CU);
+  EXPECT_EQ(result.keyboard.enter_input.key_flags, KEYEVENTF_SCANCODE);
+  EXPECT_EQ(result.keyboard.keypad_enter_input.scan_code, 0x1CU);
+  EXPECT_EQ(result.keyboard.keypad_enter_input.key_flags, KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY);
+
+  expect_ok(result.mouse.relative_status);
+  expect_ok(result.mouse.absolute_status);
+  expect_ok(result.mouse.degenerate_absolute_status);
+  expect_ok(result.mouse.left_button_status);
+  expect_ok(result.mouse.middle_button_status);
+  expect_ok(result.mouse.right_button_status);
+  expect_ok(result.mouse.side_button_status);
+  expect_ok(result.mouse.extra_button_status);
+  expect_ok(result.mouse.vertical_scroll_status);
+  expect_ok(result.mouse.horizontal_scroll_status);
+  EXPECT_EQ(result.mouse.failure_status.code(), lvh::ErrorCode::backend_failure);
+
+  EXPECT_EQ(result.keyboard.invalid_profile_status.code(), lvh::ErrorCode::unsupported_profile);
+  EXPECT_EQ(result.mouse.invalid_profile_status.code(), lvh::ErrorCode::unsupported_profile);
+  EXPECT_EQ(result.unsupported.trackpad_status.code(), lvh::ErrorCode::unsupported_profile);
+
+  EXPECT_TRUE(result.synthetic.capabilities.supports_touchscreen);
+  EXPECT_TRUE(result.synthetic.capabilities.supports_pen_tablet);
+  expect_ok(result.synthetic.touchscreen_create_status);
+  expect_ok(result.synthetic.touchscreen_place_status);
+  expect_ok(result.synthetic.touchscreen_release_status);
+  EXPECT_EQ(result.synthetic.touchscreen_invalid_profile_status.code(), lvh::ErrorCode::unsupported_profile);
+  EXPECT_EQ(result.synthetic.touchscreen_failure_status.code(), lvh::ErrorCode::backend_failure);
+  expect_ok(result.synthetic.pen_tablet_create_status);
+  expect_ok(result.synthetic.pen_tablet_button_status);
+  expect_ok(result.synthetic.pen_tablet_tool_status);
+  EXPECT_EQ(result.synthetic.pen_tablet_invalid_profile_status.code(), lvh::ErrorCode::unsupported_profile);
+  EXPECT_EQ(result.synthetic.created_devices, 2U);
+  EXPECT_EQ(result.synthetic.destroyed_devices, 2U);
+  ASSERT_GE(result.synthetic.injected_pointers.size(), 4U);
+  const auto first_touch = find_synthetic_pointer(result.synthetic.injected_pointers, [](const auto &record) {
+    return record.type == PT_TOUCH && record.pointer_id == 7U && (record.pointer_flags & POINTER_FLAG_DOWN) != 0U;
+  });
+  ASSERT_NE(first_touch, nullptr);
+  EXPECT_EQ(first_touch->x, 200);
+  EXPECT_EQ(first_touch->y, 350);
+  EXPECT_EQ(first_touch->touch_pressure, 768U);
+
+  const auto released_touch = find_synthetic_pointer(result.synthetic.injected_pointers, [](const auto &record) {
+    return record.type == PT_TOUCH && record.pointer_id == 7U && (record.pointer_flags & POINTER_FLAG_UP) != 0U;
+  });
+  ASSERT_NE(released_touch, nullptr);
+
+  const auto failed_touch = find_synthetic_pointer(result.synthetic.injected_pointers, [](const auto &record) {
+    return record.type == PT_TOUCH && record.pointer_id == 8U;
+  });
+  ASSERT_NE(failed_touch, nullptr);
+
+  const auto pen_tool = find_synthetic_pointer(result.synthetic.injected_pointers, [](const auto &record) {
+    return record.type == PT_PEN && (record.pointer_flags & POINTER_FLAG_DOWN) != 0U;
+  });
+  ASSERT_NE(pen_tool, nullptr);
+  EXPECT_EQ(pen_tool->x, 110);
+  EXPECT_EQ(pen_tool->y, 95);
+  EXPECT_EQ(pen_tool->pen_flags & PEN_FLAG_ERASER, PEN_FLAG_ERASER);
+  EXPECT_EQ(pen_tool->pen_flags & PEN_FLAG_BARREL, PEN_FLAG_BARREL);
+
+  ASSERT_EQ(result.sent_inputs.size(), 18U);
+  EXPECT_EQ(result.sent_inputs[0].type, INPUT_KEYBOARD);
+  EXPECT_EQ(result.sent_inputs[0].virtual_key, 0x41U);
+  EXPECT_EQ(result.sent_inputs[0].key_flags, 0U);
+  EXPECT_EQ(result.sent_inputs[1].virtual_key, 0x41U);
+  EXPECT_EQ(result.sent_inputs[1].key_flags, KEYEVENTF_KEYUP);
+  EXPECT_EQ(result.sent_inputs[2].scan_code, static_cast<std::uint16_t>(L'A'));
+  EXPECT_EQ(result.sent_inputs[2].key_flags, KEYEVENTF_UNICODE);
+  EXPECT_EQ(result.sent_inputs[3].scan_code, static_cast<std::uint16_t>(L'z'));
+  EXPECT_EQ(result.sent_inputs[3].key_flags, KEYEVENTF_UNICODE);
+  EXPECT_EQ(result.sent_inputs[4].scan_code, static_cast<std::uint16_t>(L'A'));
+  EXPECT_EQ(result.sent_inputs[4].key_flags, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
+  EXPECT_EQ(result.sent_inputs[5].scan_code, static_cast<std::uint16_t>(L'z'));
+  EXPECT_EQ(result.sent_inputs[5].key_flags, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
+  EXPECT_EQ(result.sent_inputs[6].virtual_key, 0x42U);
+
+  EXPECT_EQ(result.sent_inputs[7].type, INPUT_MOUSE);
+  EXPECT_EQ(result.sent_inputs[7].mouse_flags, MOUSEEVENTF_MOVE);
+  EXPECT_EQ(result.sent_inputs[7].mouse_x, 11);
+  EXPECT_EQ(result.sent_inputs[7].mouse_y, -12);
+  EXPECT_EQ(result.sent_inputs[8].mouse_flags, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
+  EXPECT_EQ(result.sent_inputs[8].mouse_x, 32768);
+  EXPECT_EQ(result.sent_inputs[8].mouse_y, 32768);
+  EXPECT_EQ(result.sent_inputs[9].mouse_flags, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
+  EXPECT_EQ(result.sent_inputs[9].mouse_x, 0);
+  EXPECT_EQ(result.sent_inputs[9].mouse_y, 0);
+  EXPECT_EQ(result.sent_inputs[10].mouse_flags, MOUSEEVENTF_LEFTDOWN);
+  EXPECT_EQ(result.sent_inputs[11].mouse_flags, MOUSEEVENTF_MIDDLEUP);
+  EXPECT_EQ(result.sent_inputs[12].mouse_flags, MOUSEEVENTF_RIGHTDOWN);
+  EXPECT_EQ(result.sent_inputs[13].mouse_flags, MOUSEEVENTF_XDOWN);
+  EXPECT_EQ(result.sent_inputs[13].mouse_data, XBUTTON1);
+  EXPECT_EQ(result.sent_inputs[14].mouse_flags, MOUSEEVENTF_XUP);
+  EXPECT_EQ(result.sent_inputs[14].mouse_data, XBUTTON2);
+  EXPECT_EQ(result.sent_inputs[15].mouse_flags, MOUSEEVENTF_WHEEL);
+  EXPECT_EQ(result.sent_inputs[15].mouse_data, 120U);
+  EXPECT_EQ(result.sent_inputs[16].mouse_flags, MOUSEEVENTF_HWHEEL);
+  EXPECT_EQ(result.sent_inputs[16].mouse_data, static_cast<std::uint32_t>(static_cast<DWORD>(-240)));
+  EXPECT_EQ(result.sent_inputs[17].mouse_flags, MOUSEEVENTF_MOVE);
+  EXPECT_EQ(result.sent_inputs[17].mouse_x, 1);
+  EXPECT_EQ(result.sent_inputs[17].mouse_y, 1);
+}
+
+TEST_F(WindowsBackendTest, MapsAbsoluteMouseInputIntoConfiguredViewport) {
+  using lvh::detail::test::windows_backend_scale_absolute_axis_to_viewport;
+
+  EXPECT_EQ(windows_backend_scale_absolute_axis_to_viewport(0.0F, 1920, 0, 1920, -1920, 3840), 32768);
+  EXPECT_EQ(windows_backend_scale_absolute_axis_to_viewport(960.0F, 1920, 0, 1920, -1920, 3840), 49143);
+  EXPECT_EQ(windows_backend_scale_absolute_axis_to_viewport(1920.0F, 1920, 0, 1920, -1920, 3840), 65518);
+  EXPECT_EQ(windows_backend_scale_absolute_axis_to_viewport(1.0F, 0, 0, 1920, -1920, 3840), 0);
+  EXPECT_EQ(windows_backend_scale_absolute_axis_to_viewport(1.0F, 1, 0, 0, 0, 1), 0);
+  EXPECT_EQ(windows_backend_scale_absolute_axis_to_viewport(1.0F, 1, 0, 1, 0, 0), 0);
+}

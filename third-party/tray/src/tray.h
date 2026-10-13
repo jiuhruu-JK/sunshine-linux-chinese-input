@@ -1,0 +1,140 @@
+/**
+ * @file src/tray.h
+ * @brief Definition of the tray API.
+ */
+#ifndef TRAY_H
+#define TRAY_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+  /**
+   * @brief Tray menu item.
+   */
+  struct tray_menu;
+
+  /**
+   * @brief Tray icon.
+   */
+  struct tray {
+    const char *icon;  ///< Icon to display.
+    const char *tooltip;  ///< Tooltip to display.
+    const char *notification_icon;  ///< Icon to display in the notification.
+    const char *notification_text;  ///< Text to display in the notification.
+    const char *notification_title;  ///< Title to display in the notification.
+    void (*notification_cb)();  ///< Callback to invoke when the notification is clicked.
+    void (*cb)(struct tray *);  ///< Callback for left click, leave null to just open menu
+    struct tray_menu *menu;  ///< Menu items.
+    const int iconPathCount;  ///< Number of icon paths.
+    const char *allIconPaths[];  ///< Array of icon paths.
+  };
+
+  /**
+   * @brief Tray menu item.
+   */
+  struct tray_menu {
+    const char *text;  ///< Text to display.
+    int disabled;  ///< Whether the item is disabled.
+    int checked;  ///< Whether the item is checked.
+    int checkbox;  ///< Whether the item is a checkbox.
+
+    void (*cb)(struct tray_menu *);  ///< Callback to invoke when the item is clicked.
+    void *context;  ///< Context to pass to the callback.
+
+    struct tray_menu *submenu;  ///< Submenu items.
+  };
+
+  /**
+   * @brief Create tray icon.
+   * @param tray The tray to initialize.
+   * @return 0 on success, -1 on error.
+   */
+  int tray_init(struct tray *tray);
+
+  /**
+   * @brief Run one iteration of the UI loop.
+   * @param blocking Whether to block the call or not.
+   * @return 0 on success, -1 if tray_exit() was called.
+   */
+  int tray_loop(int blocking);
+
+  /**
+   * @brief Update the tray icon and menu.
+   * @param tray The tray to update.
+   */
+  void tray_update(struct tray *tray);
+
+  /**
+   * @brief Force show the tray menu (for testing purposes).
+   */
+  void tray_show_menu(void);
+
+#ifdef TRAY_ENABLE_TEST_HOOKS
+  /**
+   * @brief Position the mouse over the tray icon (for testing purposes).
+   * @return 0 on success, -1 if the tray icon geometry is unavailable.
+   */
+  int tray_position_mouse_over_icon(void);
+
+  /**
+   * @brief Restore the mouse position saved by tray_position_mouse_over_icon().
+   * @return 0 on success, -1 if no saved position exists or the cursor could not be restored.
+   */
+  int tray_restore_mouse_position(void);
+#endif
+
+  /**
+   * @brief Simulate a notification click, invoking the notification callback (for testing purposes).
+   *
+   * Triggers the stored notification callback as if the user clicked the notification.
+   */
+  void tray_simulate_notification_click(void);
+
+  /**
+   * @brief Simulate clicking a top-level menu item by index (for testing purposes).
+   *
+   * Triggers the QAction associated with the given top-level menu index
+   * (separators and submenus are ignored).
+   *
+   * @param index Zero-based index in the top-level tray menu.
+   */
+  void tray_simulate_menu_item_click(int index);
+
+  /**
+   * @brief Terminate UI loop.
+   */
+  void tray_exit(void);
+
+  /**
+   * @brief Set a callback for log messages produced by the tray library.
+   *
+   * The callback is installed as a Qt message handler so all Qt diagnostic
+   * output is routed through it.
+   *
+   * @param cb Callback invoked with level (0=debug, 1=info, 2=warning, 3=error)
+   *   and the message string. Pass NULL to restore the default logging behaviour.
+   */
+  void tray_set_log_callback(void (*cb)(int level, const char *msg));
+
+  /**
+   * @brief Set application metadata used by the tray library.
+   *
+   * Must be called before tray_init(). Sets the Qt application name, display
+   * name, and desktop file name.
+   *
+   * @param app_name Application name used as a technical identifier (e.g., for
+   *   D-Bus registration). Converted to lowercase automatically. NULL uses the
+   *   default ("tray").
+   * @param app_display_name Human-readable name shown in notifications and UI.
+   *   NULL derives from the tray tooltip or falls back to app_name.
+   * @param desktop_name Desktop file name for D-Bus. NULL appends ".desktop"
+   *   to app_name.
+   */
+  void tray_set_app_info(const char *app_name, const char *app_display_name, const char *desktop_name);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif /* TRAY_H */

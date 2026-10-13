@@ -1,0 +1,149 @@
+{% extends "basic/layout.html" %}
+
+{% macro repository_icon(url) -%}
+  {% set normalized_url = url|lower %}
+  {% if 'github' in normalized_url %}
+    <svg class="dockle-repository-icon" data-dockle-repository-service="github"
+         viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path>
+    </svg>
+  {% elif 'gitlab' in normalized_url %}
+    <svg class="dockle-repository-icon" data-dockle-repository-service="gitlab"
+         viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8633 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8633 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z"></path>
+    </svg>
+  {% else %}
+    <i data-lucide="git-fork" data-dockle-repository-service="generic" aria-hidden="true"></i>
+  {% endif %}
+{%- endmacro %}
+
+{% block doctype %}<!doctype html>{% endblock %}
+
+{% block extrahead %}
+  {{ super() }}
+  <script defer src="{{ pathto('_static/lucide.min.js', 1)|e }}" data-dockle-lucide></script>
+  <script defer src="{{ pathto('_static/highlight.min.js', 1)|e }}" data-dockle-highlight></script>
+  <script defer src="{{ pathto('_static/dockle.js', 1)|e }}" data-dockle-script></script>
+  <style>
+    :root,
+    :root[data-color-scheme="light"] {
+      --dockle-primary: {{ theme_primary }};
+      --dockle-content: {{ theme_content }};
+      --dockle-background: {{ theme_light_background }};
+      --dockle-font: {{ theme_font }};
+      --dockle-code-font: {{ theme_code_font }};
+    }
+
+    :root[data-color-scheme="dark"] {
+      --dockle-background: {{ theme_dark_background }};
+      --dockle-content: #e5e7eb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-color-scheme]) {
+        --dockle-background: {{ theme_dark_background }};
+        --dockle-content: #e5e7eb;
+      }
+    }
+  </style>
+{% endblock %}
+
+{% block relbar1 %}{% endblock %}
+{% block relbar2 %}{% endblock %}
+
+{% block content %}
+  <div class="dockle-shell">
+    <aside class="dockle-sidebar" id="dockle-sidebar" aria-label="Primary navigation">
+      <div class="dockle-brand">
+        <a href="{{ pathto(master_doc)|e }}">
+          {% if logo_url %}<img class="dockle-logo" src="{{ logo_url|e }}" alt="">{% endif %}
+          {{ project|e }}
+        </a>
+        {% if release %}<span class="dockle-version">{{ release|e }}</span>{% endif %}
+      </div>
+
+      <nav class="dockle-tree" aria-label="Documentation">
+        <ul class="dockle-root-tree">
+          <li{% if pagename == master_doc %} class="current"{% endif %}>
+            <a href="{{ pathto(master_doc)|e }}"{% if pagename == master_doc %} aria-current="page"{% endif %}>
+              {{ (theme_target_title or project)|e }}
+            </a>
+          </li>
+        </ul>
+        {{ toctree(maxdepth=4, collapse=False, includehidden=True) }}
+      </nav>
+    </aside>
+
+    <div class="dockle-page">
+      <header class="dockle-mobile-header">
+        <button type="button" data-dockle-menu-toggle aria-controls="dockle-sidebar" aria-expanded="false">
+          <i data-lucide="menu" aria-hidden="true"></i>
+          <span class="visually-hidden">Menu</span>
+        </button>
+        <a href="{{ pathto(master_doc)|e }}">{{ project|e }}</a>
+      </header>
+
+      <main class="dockle-main">
+        <article class="dockle-article">
+          <div class="dockle-page-actions" aria-label="Page actions"
+               data-dockle-repository-action>
+            {% if theme_source_edit_link and sourcename %}
+              {% set source_filename = sourcename[:-4] if sourcename[-4:] == '.txt' else sourcename %}
+              <a class="dockle-page-action dockle-source-edit"
+                 href="{{ theme_source_edit_link|replace('{filename}', source_filename)|e }}"
+                 target="_blank" rel="noopener noreferrer" title="Edit this page">
+                <i data-lucide="pencil" aria-hidden="true"></i>
+                <span class="visually-hidden">Edit this page</span>
+              </a>
+            {% endif %}
+            {% if theme_repository_url %}
+              <a class="dockle-page-action dockle-repository-link" href="{{ theme_repository_url|e }}"
+                 target="_blank" rel="noopener noreferrer" title="Source repository">
+                {{ repository_icon(theme_repository_url) }}
+                <span class="visually-hidden">Source repository</span>
+              </a>
+            {% endif %}
+            <button type="button" class="dockle-theme-toggle"
+                    data-dockle-theme-toggle aria-label="Color scheme: auto">
+              <i data-lucide="sun-moon" aria-hidden="true"></i>
+            </button>
+          </div>
+          {% block body %}{{ body }}{% endblock %}
+
+          {% if prev or next %}
+            <nav class="dockle-page-links" aria-label="Page navigation">
+              {% if prev %}
+                <a class="dockle-previous" href="{{ prev.link|e }}">
+                  <i data-lucide="arrow-left" aria-hidden="true"></i>
+                  <span><small>Previous</small>{{ prev.title }}</span>
+                </a>
+              {% endif %}
+              {% if next %}
+                <a class="dockle-next" href="{{ next.link|e }}">
+                  <span><small>Next</small>{{ next.title }}</span>
+                  <i data-lucide="arrow-right" aria-hidden="true"></i>
+                </a>
+              {% endif %}
+            </nav>
+          {% endif %}
+        </article>
+
+        {% if display_toc %}
+          <aside class="dockle-on-this-page" aria-label="On this page">
+            <strong>On this page</strong>
+            {{ toc }}
+          </aside>
+        {% endif %}
+      </main>
+
+      <footer class="dockle-footer dockle-built-with" data-dockle-built-with>
+        Generated by <a href="{{ theme_dockle_url|e }}">Dockle {{ theme_dockle_version|e }}<i
+          data-lucide="external-link" aria-hidden="true"></i></a> with
+        <a href="https://www.sphinx-doc.org/">Sphinx {{ sphinx_version|e }}<i
+          data-lucide="external-link" aria-hidden="true"></i></a>.
+      </footer>
+    </div>
+  </div>
+{% endblock %}
+
+{% block footer %}{% endblock %}

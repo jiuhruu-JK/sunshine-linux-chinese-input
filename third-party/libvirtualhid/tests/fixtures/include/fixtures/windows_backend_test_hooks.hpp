@@ -1,0 +1,301 @@
+/**
+ * @file tests/fixtures/include/fixtures/windows_backend_test_hooks.hpp
+ * @brief Private Windows backend test hooks.
+ */
+#pragma once
+
+// standard includes
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+// lib includes
+#include <libvirtualhid/types.hpp>
+
+namespace lvh::detail::test {
+
+  struct WindowsBackendLifecycleResult {
+    BackendCapabilities capabilities;
+    OperationStatus create_status;
+    OperationStatus submit_status;
+    OperationStatus close_status;
+    OperationStatus second_close_status;
+    OperationStatus submit_after_close_status;
+    bool saw_output = false;
+    GamepadOutput last_output;
+    std::vector<DeviceNode> device_nodes;
+    std::size_t create_requests = 0;
+    std::size_t submit_requests = 0;
+    std::size_t destroy_requests = 0;
+  };
+
+  struct WindowsSwitchReportStreamResult {
+    OperationStatus create_status;
+    OperationStatus submit_status;
+    OperationStatus close_status;
+    bool repeated_report = false;
+    std::vector<std::uint8_t> expected_report;
+    std::vector<std::vector<std::uint8_t>> submitted_reports;
+  };
+
+  struct WindowsXboxInputDeduplicationResult {
+    OperationStatus create_status;
+    OperationStatus left_shoulder_status;
+    OperationStatus repeated_left_shoulder_status;
+    OperationStatus right_shoulder_status;
+    OperationStatus repeated_right_shoulder_status;
+    OperationStatus release_status;
+    OperationStatus close_status;
+    std::vector<std::vector<std::uint8_t>> submitted_reports;
+  };
+
+  struct WindowsBackendFailureResult {
+    OperationStatus invalid_argument_status;
+    OperationStatus unsupported_profile_status;
+    OperationStatus device_closed_status;
+    OperationStatus backend_failure_status;
+    OperationStatus transport_failure_status;
+    OperationStatus unavailable_status;
+    OperationStatus xbox_360_create_status;
+    OperationStatus oversized_descriptor_status;
+    OperationStatus oversized_input_report_status;
+    OperationStatus oversized_output_report_status;
+    OperationStatus empty_nodes_create_status;
+    OperationStatus oversized_submit_status;
+    std::vector<DeviceNode> empty_device_nodes;
+  };
+
+  struct WindowsGenericPidOrderingResult {
+    bool completed = false;
+    std::vector<std::uint16_t> strengths;
+  };
+
+  struct WindowsHidCreatedDevice {
+    std::uint32_t device_type = 0;
+    std::uint32_t bus_type = 0;
+    std::uint32_t flags = 0;
+    std::uint16_t vendor_id = 0;
+    std::uint16_t product_id = 0;
+    std::uint16_t version = 0;
+    std::uint8_t report_id = 0;
+    std::uint32_t input_report_size = 0;
+    std::uint32_t output_report_size = 0;
+    std::string name;
+    std::string manufacturer;
+    std::string stable_id;
+  };
+
+  struct WindowsHidKeyboardResult {
+    struct OperationResults {
+      OperationStatus create_status;
+      OperationStatus letter_press_status;
+      OperationStatus modifier_press_status;
+      OperationStatus extended_press_status;
+      OperationStatus letter_release_status;
+      OperationStatus enter_press_status;
+      OperationStatus enter_release_status;
+      OperationStatus keypad_enter_press_status;
+      OperationStatus keypad_enter_release_status;
+      OperationStatus unmapped_submit_status;
+      OperationStatus text_status;
+      OperationStatus close_status;
+      OperationStatus protocol_failure_status;
+      OperationStatus license_fallback_create_status;
+      OperationStatus license_fallback_submit_status;
+    };
+
+    struct RequestObservations {
+      std::vector<std::vector<std::uint8_t>> reports;
+      std::size_t destroy_requests = 0;
+      std::size_t fallback_send_inputs = 0;
+      std::size_t license_create_requests = 0;
+      std::size_t license_fallback_send_inputs = 0;
+    };
+
+    OperationResults operations;
+    WindowsHidCreatedDevice device;
+    RequestObservations observations;
+  };
+
+  struct WindowsHidMouseResult {
+    struct OperationResults {
+      OperationStatus create_status;
+      OperationStatus motion_status;
+      OperationStatus large_scroll_status;
+      OperationStatus partial_scroll_status;
+      OperationStatus completed_scroll_status;
+      OperationStatus close_status;
+      OperationStatus protocol_failure_status;
+      OperationStatus license_fallback_create_status;
+      OperationStatus license_fallback_submit_status;
+    };
+
+    struct RequestObservations {
+      std::vector<std::vector<std::uint8_t>> reports;
+      std::size_t destroy_requests = 0;
+      std::size_t license_create_requests = 0;
+      std::size_t license_fallback_send_inputs = 0;
+    };
+
+    OperationResults operations;
+    WindowsHidCreatedDevice device;
+    RequestObservations observations;
+  };
+
+  struct WindowsPlayStationTransportResult {
+    OperationStatus dualshock4_status;
+    OperationStatus dualsense_status;
+    DeviceProfile dualshock4_effective_profile;
+    DeviceProfile dualsense_effective_profile;
+  };
+
+  struct WindowsBackendUtilityResult {
+    std::vector<std::string> default_device_paths;
+    std::vector<std::string> custom_device_paths;
+    OperationStatus formatted_error_status;
+    OperationStatus fallback_error_status;
+    OperationStatus keyboard_create_status;
+    OperationStatus keyboard_close_status;
+    OperationStatus keyboard_submit_after_close_status;
+    OperationStatus mouse_create_status;
+    OperationStatus mouse_close_status;
+    OperationStatus mouse_submit_after_close_status;
+    bool timeout_result = true;
+  };
+
+  struct WindowsOverlappedIoResult {
+    OperationStatus immediate_status;
+    OperationStatus pending_status;
+    OperationStatus start_failure_status;
+    OperationStatus completion_failure_status;
+    bool immediate_saw_event = false;
+    bool immediate_called_completion = false;
+    bool pending_saw_event = false;
+    bool pending_waited = false;
+    bool cancellation_called = false;
+    bool cancellation_drained_after_cancel = false;
+    bool cancellation_waited = false;
+    std::uint32_t immediate_bytes_returned = 0;
+    std::uint32_t pending_bytes_returned = 0;
+  };
+
+  struct WindowsSendInputRecord {
+    std::uint32_t type = 0;
+    std::uint16_t virtual_key = 0;
+    std::uint16_t scan_code = 0;
+    std::uint32_t key_flags = 0;
+    std::int32_t mouse_x = 0;
+    std::int32_t mouse_y = 0;
+    std::uint32_t mouse_data = 0;
+    std::uint32_t mouse_flags = 0;
+  };
+
+  struct WindowsKeyboardSendInputResult {
+    OperationStatus down_status;
+    OperationStatus up_status;
+    OperationStatus text_status;
+    OperationStatus empty_text_status;
+    OperationStatus invalid_text_status;
+    OperationStatus failure_status;
+    OperationStatus normalized_status;
+    OperationStatus enter_status;
+    OperationStatus keypad_enter_status;
+    OperationStatus invalid_profile_status;
+    WindowsSendInputRecord normalized_input;
+    WindowsSendInputRecord enter_input;
+    WindowsSendInputRecord keypad_enter_input;
+  };
+
+  struct WindowsMouseSendInputResult {
+    OperationStatus relative_status;
+    OperationStatus absolute_status;
+    OperationStatus degenerate_absolute_status;
+    OperationStatus left_button_status;
+    OperationStatus middle_button_status;
+    OperationStatus right_button_status;
+    OperationStatus side_button_status;
+    OperationStatus extra_button_status;
+    OperationStatus vertical_scroll_status;
+    OperationStatus horizontal_scroll_status;
+    OperationStatus failure_status;
+    OperationStatus invalid_profile_status;
+  };
+
+  struct WindowsUnsupportedInputResult {
+    OperationStatus trackpad_status;
+  };
+
+  struct WindowsSyntheticPointerRecord {
+    std::uint32_t type = 0;
+    std::uint32_t count = 0;
+    std::uint32_t pointer_flags = 0;
+    std::uint32_t pointer_id = 0;
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    std::uint32_t touch_mask = 0;
+    std::uint32_t touch_pressure = 0;
+    std::uint32_t touch_orientation = 0;
+    std::uint32_t pen_mask = 0;
+    std::uint32_t pen_flags = 0;
+    std::int32_t pen_tilt_x = 0;
+    std::int32_t pen_tilt_y = 0;
+  };
+
+  struct WindowsSyntheticPointerResult {
+    BackendCapabilities capabilities;
+    OperationStatus touchscreen_create_status;
+    OperationStatus touchscreen_place_status;
+    OperationStatus touchscreen_release_status;
+    OperationStatus touchscreen_invalid_profile_status;
+    OperationStatus touchscreen_failure_status;
+    OperationStatus pen_tablet_create_status;
+    OperationStatus pen_tablet_button_status;
+    OperationStatus pen_tablet_tool_status;
+    OperationStatus pen_tablet_invalid_profile_status;
+    std::size_t created_devices = 0;
+    std::size_t destroyed_devices = 0;
+    std::vector<WindowsSyntheticPointerRecord> injected_pointers;
+  };
+
+  struct WindowsBackendSendInputResult {
+    WindowsKeyboardSendInputResult keyboard;
+    WindowsMouseSendInputResult mouse;
+    WindowsUnsupportedInputResult unsupported;
+    WindowsSyntheticPointerResult synthetic;
+    std::vector<WindowsSendInputRecord> sent_inputs;
+  };
+
+  WindowsBackendLifecycleResult windows_backend_fake_channel_lifecycle();
+  WindowsSwitchReportStreamResult windows_backend_switch_report_stream();
+  WindowsXboxInputDeduplicationResult windows_backend_xbox_input_deduplication(GamepadProfileKind kind);
+  WindowsPlayStationTransportResult windows_backend_playstation_transport();
+  WindowsGenericPidOrderingResult windows_backend_generic_pid_callback_ordering();
+  WindowsHidKeyboardResult windows_backend_hid_keyboard();
+  WindowsHidMouseResult windows_backend_hid_mouse();
+  WindowsBackendFailureResult windows_backend_fake_channel_failures();
+  WindowsBackendUtilityResult windows_backend_fake_channel_utilities();
+  WindowsOverlappedIoResult windows_backend_overlapped_device_io();
+  WindowsBackendSendInputResult windows_backend_send_input_devices();
+
+  /**
+   * @brief Scale a source coordinate through a target viewport into a virtual desktop axis.
+   *
+   * @param value Source coordinate.
+   * @param source_dimension Source coordinate-space dimension.
+   * @param viewport_offset Target viewport offset.
+   * @param viewport_dimension Target viewport dimension.
+   * @param desktop_offset Virtual desktop origin.
+   * @param desktop_dimension Virtual desktop dimension.
+   * @return Win32 normalized absolute coordinate.
+   */
+  std::int32_t windows_backend_scale_absolute_axis_to_viewport(
+    float value,
+    std::int32_t source_dimension,
+    std::int32_t viewport_offset,
+    std::int32_t viewport_dimension,
+    std::int32_t desktop_offset,
+    std::int32_t desktop_dimension
+  );
+
+}  // namespace lvh::detail::test

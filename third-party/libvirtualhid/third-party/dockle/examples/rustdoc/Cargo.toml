@@ -1,0 +1,6 @@
+[package]
+name = "dockle-preview"
+version = "0.1.0"
+edition = "2024"
+description = "A dependency-free rustdoc fixture for Dockle"
+publish = false
