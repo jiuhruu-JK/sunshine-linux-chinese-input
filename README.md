@@ -36,6 +36,7 @@ cd sunshine-input-method
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
 sudo install -m755 sunshine /usr/local/bin/
+sudo cp -r assets /usr/local/          # Web UI 资源；漏了这步登录后白屏
 ```
 
 **2. 装 fcitx5 插件**
