@@ -1,6 +1,8 @@
-# Linux Sunshine 中文输入插件
+# Linux Sunshine 中文输入方案
 
 给 Linux 版 Sunshine 补上中文远程输入：手机 Moonlight 打中文，原版乱码丢字，这套不乱。
+
+方案 = **魔改版 Sunshine + fcitx5 插件**，不只是插件——Sunshine 本体也改了，两个都要装。
 
 **仅限 Linux（fcitx5）。Windows/macOS 用不了。**
 
