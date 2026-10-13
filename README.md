@@ -25,6 +25,13 @@ sunshine-linux-chinese-input
 **不占用剪贴板**：剪贴板粘贴类方案会覆盖你复制的内容；本方案完全不动剪贴板，
 远程输入的同时，剪贴板照常用。
 
+## 版本
+
+- 基于上游 [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine)
+  **v2026.1011.160319**（commit `d1fc311`，2026-10-11）魔改。
+- 上游更新后，本魔改**不保证还能适配**，装之前先对版本。
+- 哪天上游官方支持了中文输入，就不用这套了，直接用上游。
+
 ## 怎么用
 
 只在 Ubuntu 26.04 + KDE(Wayland) 验证过，别的机器能不能用不知道。
