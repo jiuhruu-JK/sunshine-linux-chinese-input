@@ -48,15 +48,10 @@ sudo install -m755 libsunshineinput.so /usr/lib/x86_64-linux-gnu/fcitx5/
 sudo install -m644 ../sunshineinput.conf /usr/share/fcitx5/addon/
 ```
 
-**3. 验证**
+**3. 用**
 
-重启 fcitx5，焦点放到任意文本框，执行：
-
-```bash
-sunshine-input-test --text "你好"
-```
-
-窗口里出现「你好」= 成功。
+重启 fcitx5，焦点放到任意文本框，尽情输入文字就行。
+随便输、大量输——原版方案是输多了才乱码丢字，本方案不会。
 
 ## 许可
 
