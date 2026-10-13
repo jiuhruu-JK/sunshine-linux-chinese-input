@@ -10,8 +10,8 @@ Linux 版 Sunshine 远程输入中文会乱码丢字。这套方案修好它。
 
 ```
 sunshine-linux-chinese-input
-├── sunshine/          魔改版 Sunshine
-└── fcitx5-plugin/     fcitx5 插件
+├── sunshine/          魔改版 Sunshine   ← 文本改走输入法通道，不再走会乱码的 Ctrl+Shift+U
+└── fcitx5-plugin/     fcitx5 插件       ← 接收整段文本，从输入法标准接口一次上屏
 ```
 
 ## 原理
