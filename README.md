@@ -1,16 +1,15 @@
-# sunshine-input-method
+# Linux Sunshine 中文输入插件
 
-## 解决什么问题
+给 Linux 版 Sunshine 补上中文远程输入：手机 Moonlight 打中文，原版乱码丢字，这套不乱。
 
-Linux 版 Sunshine 远程输入中文 → 乱码、丢字。
-本仓库解决它。
+**仅限 Linux（fcitx5）。Windows/macOS 用不了。**
 
-## 解决方案（两个东西，都要装）
+## 方案（两个东西，都要装）
 
 ```
-sunshine-input-method
-├── 魔改版 Sunshine        ← 文本改走输入法通道，不再走会乱码的 Ctrl+Shift+U
-└── fcitx5 插件            ← 接收整段文本，从输入法标准接口一次上屏
+sunshine-linux-chinese-input
+├── sunshine/          魔改版 Sunshine   ← 文本改走输入法通道，不再走会乱码的 Ctrl+Shift+U
+└── fcitx5-plugin/     fcitx5 插件       ← 接收整段文本，从输入法标准接口一次上屏
 ```
 
 ## 原理
@@ -26,13 +25,13 @@ sunshine-input-method
 
 ## 怎么用
 
-仅限 Linux + fcitx5。只在 Ubuntu 26.04 + KDE(Wayland) 验证过，别的机器能不能用不知道。
+只在 Ubuntu 26.04 + KDE(Wayland) 验证过，别的机器能不能用不知道。
 
 **1. 装魔改版 Sunshine**
 
 ```bash
-git clone https://github.com/jiuhruu-JK/sunshine-input-method.git
-cd sunshine-input-method
+git clone https://github.com/jiuhruu-JK/sunshine-linux-chinese-input.git
+cd sunshine-linux-chinese-input/sunshine
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
 sudo install -m755 sunshine /usr/local/bin/
@@ -42,7 +41,7 @@ sudo cp -r assets /usr/local/          # Web UI 资源；漏了这步登录后�
 **2. 装 fcitx5 插件**
 
 ```bash
-cd ../plugin/sunshineinput
+cd ../../fcitx5-plugin
 mkdir build && cd build
 cmake .. && make
 sudo install -m755 libsunshineinput.so /usr/lib/x86_64-linux-gnu/fcitx5/

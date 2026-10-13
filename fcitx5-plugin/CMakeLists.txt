@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(sunshine-input-mvp CXX)
+project(sunshineinput CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,10 +15,6 @@ set_target_properties(sunshineinput PROPERTIES PREFIX "lib")
 target_link_libraries(sunshineinput Fcitx5::Core)
 target_compile_options(sunshineinput PRIVATE -Wall -Wextra)
 
-# ---------- 测试客户端（CLI） ----------
-add_executable(sunshine-input-test src/client.cpp)
-
-install(TARGETS sunshineinput sunshine-input-test
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/fcitx5
-        RUNTIME DESTINATION bin)
+install(TARGETS sunshineinput
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/fcitx5)
 install(FILES sunshineinput.conf DESTINATION ${CMAKE_INSTALL_DATADIR}/fcitx5/addon)
