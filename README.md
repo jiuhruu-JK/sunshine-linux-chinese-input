@@ -27,11 +27,11 @@ sunshine-linux-chinese-input
 
 ## 版本
 
-- 基于上游 [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine)
-  **v2026.1011.160319**（commit `d1fc311`，2026-10-11）魔改。
-- 魔改就是魔改，只适配本仓库的 fcitx5 插件，不适配上游任何其他版本。
-- 原版在 Windows/macOS 的中文输入一直正常，坏的只是 **Linux 远程中文输入**；
-  哪天上游把 Linux 这个修好了，直接用上游，不用这套。
+- 基于 [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine)
+  **v2026.1011.160319**（commit `d1fc311`，2026-10-11）。
+- 本仓库只配套这个版本，不跟上游更新。
+- 原版在 Windows/macOS 的中文输入一直正常，需要修的只是 Linux 远程中文输入；
+  上游若在 Linux 补上了，直接用上游即可。
 
 ## 怎么用
 
