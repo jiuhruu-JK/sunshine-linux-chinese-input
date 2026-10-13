@@ -20,7 +20,7 @@ sunshine-linux-chinese-input
 手机 Moonlight 打字 → 魔改版 Sunshine → 本机套接字 → fcitx5 插件 → 当前窗口上屏
 ```
 
-不模拟键盘，不碰剪贴板，整段 UTF-8 一次上屏，2210 字实测零丢失。
+不模拟键盘，不碰剪贴板，整段 UTF-8 一次上屏，实测零丢失。
 
 ## 版本
 
