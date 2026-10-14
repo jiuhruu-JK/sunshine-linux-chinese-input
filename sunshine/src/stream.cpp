@@ -24,6 +24,10 @@ extern "C" {
 }
 
 // local includes
+#ifdef __linux__
+  // built-in input method takeover for streaming sessions
+  #include "platform/linux/input_method.h"
+#endif
 #include "config.h"
 #include "display_device.h"
 #include "globals.h"
@@ -2249,6 +2253,12 @@ namespace stream {
       // If this is the last session, invoke the platform callbacks
       if (--running_sessions == 0) {
         bool revert_display_config {config::video.dd.config_revert_on_disconnect};
+#ifdef __linux__
+        // Hand desktop input method ownership back to the session when the last
+        // client leaves. Bare Desktop sessions never reach proc::terminate(), so
+        // the disconnect hook there alone would leave the takeover record behind.
+        input_method::disconnect();
+#endif
         if (proc::proc.running()) {
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
           system_tray::update_tray_pausing(proc::proc.get_last_run_app_name());

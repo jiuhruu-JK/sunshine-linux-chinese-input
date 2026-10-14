@@ -41,6 +41,11 @@
   #include <share.h>
 #endif
 
+#ifdef __linux__
+  // built-in input method takeover for streaming sessions
+  #include "platform/linux/input_method.h"
+#endif
+
 namespace proc {
   using namespace std::literals;
   namespace pt = boost::property_tree;
@@ -184,6 +189,13 @@ namespace proc {
     _app = *iter;
     _app_prep_begin = std::begin(_app.prep_cmds);
     _app_prep_it = _app_prep_begin;
+
+#ifdef __linux__
+    // Take over desktop input method ownership before the session's prep commands
+    // run, so the KWin-managed fcitx5 chain is healthy when the client starts typing.
+    // The call is failure-tolerant by design: it only logs and never aborts the launch.
+    input_method::connect();
+#endif
 
     // Add Stream-specific environment variables
     _env["SUNSHINE_APP_ID"] = std::to_string(_app_id);
@@ -373,6 +385,12 @@ namespace proc {
         BOOST_LOG(warning) << "Return code ["sv << ret << ']';
       }
     }
+
+#ifdef __linux__
+    // Hand desktop input method ownership back to the session after the undo
+    // commands ran. Without a takeover record this is a no-op.
+    input_method::disconnect();
+#endif
 
     _pipe.reset();
 
