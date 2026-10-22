@@ -37,6 +37,14 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
+      - name: Set up Cachix
+        # 必须放在构建之前：cachix-action 装好守护进程后，构建出的路径才会被
+        # post-build hook 捕获并推送。放在构建之后启动，守护进程看到的是空增量。
+        uses: cachix/cachix-action@v15
+        with:
+          name: sunshine-cn-input
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
       - name: Fetch upstream
         run: |
           git remote add upstream https://github.com/LizardByte/Sunshine.git || true
@@ -54,9 +62,3 @@ jobs:
 
       - name: Build and run unit tests
         run: nix build .#sunshine-cn-input-tests --print-out-paths --no-link --print-build-logs
-
-      - name: Push to Cachix
-        uses: cachix/cachix-action@v15
-        with:
-          name: sunshine-cn-input
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}

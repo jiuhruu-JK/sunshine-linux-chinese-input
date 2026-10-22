@@ -268,6 +268,8 @@ stdenv.mkDerivation (finalAttrs: {
   installPhase = if withTests then ''
     runHook preInstall
 
+    # tee 会把管道退出码变成自己的；没有 pipefail 时测试失败也会被吞掉。
+    set -o pipefail
     mkdir -p "$out/share/sunshine-cn-input"
     ./tests/test_sunshine --gtest_filter='InputMethod*' 2>&1 | tee "$out/share/sunshine-cn-input/test-results.txt"
 
