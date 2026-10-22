@@ -42,10 +42,18 @@ else
         echo "   保持删除 $f"
         git rm -q -f --ignore-unmatch -- "$f"
         ;;
+      *~*)
+        # 目录阻挡：我们的目录挡住了上游的子模块条目，git 把我们的目录挪成了
+        # <路径>~<提交>，冲突记录在挪名之后的路径上。保留重新收录好的内容。
+        orig="${f%%~*}"
+        echo "   保留重新收录的内容 $orig"
+        rm -rf -- "$f"
+        git rm -q -r --cached --ignore-unmatch -- "$f"
+        git add -A -- "$orig"
+        ;;
       third-party/* | packaging/linux/flatpak/deps/*)
-        # 收录目录：保留上面重新收录好的内容。
-        echo "   保留重新收录的内容 $f"
-        rm -rf "${f}"~*
+        # 上游新增/删除的收录目录：按上面的重新收录结果为准。
+        echo "   按重新收录结果处理 $f"
         git rm -q -r --cached --ignore-unmatch -- "$f"
         git add -A -- "$f"
         ;;
