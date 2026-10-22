@@ -90,16 +90,19 @@ Nix 侧：`nix build .#sunshine-cn-input-tests`（云端 CI 里跑）。
 
 这条链路完全在输入法进程内部完成，KWin 的 VirtualKeyboard 开关是什么值都不影响它。
 
-至于「虚拟键盘设成『无』，让 fcitx5 走独立 text-input-v3」这种说法：
-在 Plasma 6 上并不通用 —— KWin 正是通过「虚拟键盘 = 某个输入法」把 Wayland
-socket fd 交给它拉起的 fcitx5，fcitx5 由此拿到 IM 角色，原生 Wayland 应用
-才拿得到输入上下文。设成「无」之后，fcitx5 拿不到 IM 角色，
-浏览器这类原生 Wayland 应用会打不出中文。
+KDE Plasma 6 上有两条让 fcitx5 拿到 IM 角色的路子：
 
-所以：
+1. **KWin 托管**（「虚拟键盘 = Fcitx 5」）：KWin 通过 launcher 拉起 fcitx5，
+   把 Wayland socket fd 直接交给它。这是 Plasma 6 的常规做法。
+2. **独立运行**（「虚拟键盘 = 无」+ fcitx5 自己跑 `text-input-v3`）：
+   原理上成立，但独立启动的 fcitx5 必须能连上合成器的 Wayland display。
+   从 systemd user service 启动时，会话里的 `WAYLAND_DISPLAY` / `WAYLAND_SOCKET`
+   默认不在 user manager 的环境里，连不上就拿不到 IM 角色，
+   原生 Wayland 应用会没有输入上下文（表现为浏览器打不出中文）。
+
+用哪条都行，是使用方自己的桌面配置。所以：
 
 - 本方案**不去碰**这一项：既不杀 fcitx5，也不改 KWin 的 VirtualKeyboard 开关；
-- 桌面会话的输入法归桌面会话管，是使用方自己的选择；
 - 需要调整时，由使用方在自己的桌面配置里改，不要塞进 Sunshine 或打包层。
 
 > 历史教训：早先的实现会在会话开始时 `kill_all()` 掉所有 fcitx5 实例，
