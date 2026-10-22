@@ -27,7 +27,9 @@ script_dir=$(dirname "$0")
 # 重新生成全部收录内容
 "$script_dir/vendor-submodules.sh" apply "$UPSTREAM_REF" --all
 
-changed=$(git status --porcelain)
+# 只看收录目录与清单本身：工作树里其它本地改动不归这个门禁管。
+mapfile -t vendored_paths < <(awk '{print $2}' "$script_dir/vendored-submodules.txt")
+changed=$(git status --porcelain -- "${vendored_paths[@]}" "$script_dir/vendored-submodules.txt")
 if [ -n "$changed" ]; then
   echo "::error::收录的第三方依赖与上游 $UPSTREAM_REF 不一致：" >&2
   printf '%s\n' "$changed" | head -50 >&2
