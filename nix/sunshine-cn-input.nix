@@ -26,12 +26,12 @@
   avahi,
   libevdev,
   libpulseaudio,
-  libxtst,
-  libxrandr,
-  libxi,
-  libxfixes,
-  libxdmcp,
-  libx11,
+  libXtst,
+  libXrandr,
+  libXi,
+  libXfixes,
+  libXdmcp,
+  libX11,
   libxcb,
   libdrm,
   wayland,
@@ -150,12 +150,12 @@ stdenv.mkDerivation (finalAttrs: {
     avahi
     libevdev
     libpulseaudio
-    libxtst
-    libxrandr
-    libxi
-    libxfixes
-    libxdmcp
-    libx11
+    libXtst
+    libXrandr
+    libXi
+    libXfixes
+    libXdmcp
+    libX11
     libxcb
     libdrm
     wayland
