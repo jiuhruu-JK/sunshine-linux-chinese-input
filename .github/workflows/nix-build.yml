@@ -1,0 +1,32 @@
+name: nix-build
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'cmake/**'
+      - 'fcitx5-plugin/**'
+      - 'nix/**'
+      - 'flake.nix'
+      - 'upstream-version'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: sunshine-cn-input
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: 构建并推送缓存
+        run: nix build .#sunshine-cn-input .#fcitx5-sunshine-input --print-build-logs

@@ -1,0 +1,51 @@
+name: sync-upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *'      # 每天 00:00 UTC / 北京 08:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置 git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: 拉取上游
+        run: |
+          git remote add upstream https://github.com/LizardByte/Sunshine.git || true
+          git fetch upstream --tags --force
+
+      - name: 取最新 tag
+        id: tag
+        run: |
+          TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          echo "取到 $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: 合并上游
+        run: git merge --no-edit "${{ steps.tag.outputs.tag }}"
+
+      - name: 边界检查
+        run: bash ci/check-boundary.sh "${{ steps.tag.outputs.tag }}"
+
+      - name: 记录版本
+        run: echo "${{ steps.tag.outputs.tag }}" | sed 's/^v//' > upstream-version
+
+      - name: 提交并打 tag
+        run: |
+          git add -A
+          git diff --quiet && git diff --staged --quiet || git commit -m "sync: upstream ${{ steps.tag.outputs.tag }}"
+          git push
+          git tag -f "${{ steps.tag.outputs.tag }}"
+          git push -f origin "${{ steps.tag.outputs.tag }}"
