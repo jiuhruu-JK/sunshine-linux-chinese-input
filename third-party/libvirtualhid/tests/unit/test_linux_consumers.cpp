@@ -57,6 +57,18 @@ namespace {
   constexpr std::string_view playstation_uhid_name = "Wireless Controller";
 
   /**
+   * @brief Check the xpadneo prerequisite for native Guide-chord tests.
+   *
+   * @return Whether the loaded driver has Guide shift mode enabled.
+   */
+  bool has_xpadneo_guide_shift_mode() {
+    std::ifstream parameter {"/sys/module/hid_xpadneo/parameters/disable_shift_mode"};
+    std::string disabled;
+    parameter >> disabled;
+    return disabled == "N" || disabled == "0";
+  }
+
+  /**
    * @brief SDL-visible gamepad case.
    */
   struct SdlGamepadConsumerCase {
@@ -474,15 +486,24 @@ namespace {
     return false;
   }
 
+  /**
+   * @brief Wait for SDL to observe a controller button press or release.
+   *
+   * @param controller Controller receiving virtual input.
+   * @param expected_button Button to inspect.
+   * @param pressed Expected button state.
+   * @return Whether SDL observed the expected state before the timeout.
+   */
   bool wait_for_sdl_controller_button(
     SDL_GameController *controller,
-    SDL_GameControllerButton expected_button
+    SDL_GameControllerButton expected_button,
+    bool pressed = true
   ) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds {3};
     while (std::chrono::steady_clock::now() < deadline) {
       SDL_GameControllerUpdate();
       pump_sdl_events();
-      if (SDL_GameControllerGetButton(controller, expected_button) != 0) {
+      if ((SDL_GameControllerGetButton(controller, expected_button) != 0) == pressed) {
         return true;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds {20});
@@ -754,6 +775,49 @@ namespace {
     );
   }
 
+  /**
+   * @brief Verify that a Guide chord preserves both buttons through independent releases.
+   *
+   * @param controller SDL controller receiving virtual input.
+   * @param gamepad Virtual gamepad submitting the chord.
+   * @param logical_button Button held together with Guide.
+   * @param sdl_button Corresponding SDL button.
+   */
+  void expect_sdl_guide_chord(
+    SDL_GameController *controller,
+    lvh::Gamepad &gamepad,
+    lvh::GamepadButton logical_button,
+    SDL_GameControllerButton sdl_button
+  ) {
+    lvh::GamepadState state;
+    state.buttons.set(lvh::GamepadButton::guide);
+    ASSERT_TRUE(gamepad.submit(state).ok());
+    ASSERT_TRUE(wait_for_sdl_controller_button(controller, SDL_CONTROLLER_BUTTON_GUIDE));
+
+    state.buttons.set(logical_button);
+    ASSERT_TRUE(gamepad.submit(state).ok());
+    ASSERT_TRUE(wait_for_sdl_controller_button(controller, sdl_button));
+    EXPECT_NE(SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_GUIDE), 0);
+
+    state.buttons.set(lvh::GamepadButton::guide, false);
+    ASSERT_TRUE(gamepad.submit(state).ok());
+    ASSERT_TRUE(wait_for_sdl_controller_button(controller, SDL_CONTROLLER_BUTTON_GUIDE, false));
+    EXPECT_NE(SDL_GameControllerGetButton(controller, sdl_button), 0);
+
+    state.buttons.set(lvh::GamepadButton::guide);
+    ASSERT_TRUE(gamepad.submit(state).ok());
+    ASSERT_TRUE(wait_for_sdl_controller_button(controller, SDL_CONTROLLER_BUTTON_GUIDE));
+    EXPECT_NE(SDL_GameControllerGetButton(controller, sdl_button), 0);
+
+    state.buttons.set(logical_button, false);
+    ASSERT_TRUE(gamepad.submit(state).ok());
+    ASSERT_TRUE(wait_for_sdl_controller_button(controller, sdl_button, false));
+    EXPECT_NE(SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_GUIDE), 0);
+
+    ASSERT_TRUE(gamepad.submit({}).ok());
+    ASSERT_TRUE(wait_for_sdl_controller_button(controller, SDL_CONTROLLER_BUTTON_GUIDE, false));
+  }
+
   void exercise_sdl_canonical_gamepad_controller(
     const SdlGamepadConsumerCase &test_case,
     const lvh::DeviceProfile &expected_profile,
@@ -808,6 +872,13 @@ namespace {
       }
     }
 
+    for (const auto &[logical_button, sdl_button] : button_cases) {
+      if (logical_button != guide) {
+        SCOPED_TRACE(std::format("Guide chord with button {}", std::to_underlying(logical_button)));
+        ASSERT_NO_FATAL_FAILURE(expect_sdl_guide_chord(controller.get(), gamepad, logical_button, sdl_button));
+      }
+    }
+
     lvh::GamepadState trigger_state;
     trigger_state.left_trigger = 0.25F;
     trigger_state.right_trigger = 0.75F;
@@ -839,6 +910,31 @@ namespace {
         exercise_sdl_canonical_gamepad_controller(test_case, expected_profile, joystick_index, gamepad);
       }
     );
+  }
+
+  void exercise_sdl_idle_switch_pro_controller(int joystick_index, lvh::Gamepad &gamepad) {
+    SdlGameController controller {SDL_GameControllerOpen(joystick_index), &SDL_GameControllerClose};
+    ASSERT_NE(controller.get(), nullptr) << SDL_GetError();
+    auto *joystick = SDL_GameControllerGetJoystick(controller.get());
+    ASSERT_NE(joystick, nullptr);
+    const auto *path = SDL_JoystickPath(joystick);
+    ASSERT_NE(path, nullptr);
+    ASSERT_NE(std::string_view {path}.find("hidraw"), std::string_view::npos)
+      << "The idle-disconnect regression requires the HIDAPI controller";
+
+    // Switch HIDAPI treats three seconds without full-state input as a Bluetooth disconnect.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds {4};
+    while (std::chrono::steady_clock::now() < deadline) {
+      SDL_GameControllerUpdate();
+      pump_sdl_events();
+      ASSERT_EQ(SDL_GameControllerGetAttached(controller.get()), SDL_TRUE);
+      std::this_thread::sleep_for(std::chrono::milliseconds {20});
+    }
+
+    lvh::GamepadState state;
+    state.buttons.set(lvh::GamepadButton::a);
+    ASSERT_TRUE(gamepad.submit(state).ok());
+    EXPECT_TRUE(wait_for_sdl_controller_button(controller.get(), SDL_CONTROLLER_BUTTON_A));
   }
 
 #if defined(LIBVIRTUALHID_TEST_SDL3_XBOX_CONSUMER_PATH)
@@ -1011,6 +1107,29 @@ TEST_F(LinuxConsumerTest, SdlSeesXboxOneCanonicalButtons) {
   });
 }
 
+TEST_F(LinuxConsumerTest, SdlSeesXboxGuideChordsWithXpadneoShiftMode) {
+  ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uhid"));
+  if (!has_xpadneo_guide_shift_mode()) {
+    GTEST_SKIP() << "This test requires loaded xpadneo with Guide shift mode enabled";
+  }
+
+  for (const auto kind : {lvh::GamepadProfileKind::xbox_one, lvh::GamepadProfileKind::xbox_series}) {
+    const auto series = kind == lvh::GamepadProfileKind::xbox_series;
+    const SdlGamepadConsumerCase test_case {
+      .profile = *lvh::profiles::gamepad_profile(kind),
+      .name_suffix = "SDL Xbox Guide Chords",
+      .stable_id = "libvirtualhid-sdl-xpadneo-guide-test",
+      .expected_product_id = static_cast<std::uint16_t>(series ? 0x0B13 : 0x0B20),
+      .minimum_buttons = series ? 16 : 15,
+      .minimum_axes = 6,
+      .require_sdl_rumble = true,
+      .require_trigger_rumble = true,
+      .require_battery = true,
+    };
+    ASSERT_NO_FATAL_FAILURE(run_sdl_canonical_gamepad_test(test_case));
+  }
+}
+
 TEST_F(LinuxConsumerTest, SdlSeesXboxSeriesCanonicalButtons) {
   ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uhid"));
 
@@ -1054,6 +1173,23 @@ TEST_F(LinuxConsumerTest, SdlSeesSwitchProCanonicalButtons) {
     .require_sdl_rumble = true,
     .require_motion = true,
   });
+}
+
+TEST_F(LinuxConsumerTest, SdlKeepsIdleSwitchProConnected) {
+  ASSERT_TRUE(HasReadableWritableDeviceNode("/dev/uhid"));
+
+  run_sdl_gamepad_test(
+    {
+      .profile = lvh::profiles::switch_pro(),
+      .name_suffix = "SDL Idle Switch Pro",
+      .stable_id = "02:00:00:00:00:06",
+      .require_sdl_rumble = true,
+    },
+    SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_EVENTS,
+    [](const auto &, int joystick_index, lvh::Gamepad &gamepad) {
+      exercise_sdl_idle_switch_pro_controller(joystick_index, gamepad);
+    }
+  );
 }
 
 TEST_F(LinuxConsumerTest, SdlSeesDualSenseUsbControllerBehavior) {
@@ -1204,6 +1340,16 @@ TEST_F(LinuxConsumerTest, LibinputSeesSplitUinputMouseMotionAndButtons) {
   ASSERT_NE(pointer_event, nullptr);
   EXPECT_NEAR(libinput_event_pointer_get_absolute_x_transformed(pointer_event, 100), 75.0, 0.1);
   EXPECT_NEAR(libinput_event_pointer_get_absolute_y_transformed(pointer_event, 100), 75.0, 0.1);
+
+  ASSERT_TRUE(created.mouse->vertical_scroll(120).ok());
+  event = wait_for_libinput_event(absolute_context.get(), {LIBINPUT_EVENT_POINTER_SCROLL_WHEEL});
+  ASSERT_NE(event.get(), nullptr);
+  pointer_event = libinput_event_get_pointer_event(event.get());
+  ASSERT_NE(pointer_event, nullptr);
+  EXPECT_DOUBLE_EQ(
+    libinput_event_pointer_get_scroll_value_v120(pointer_event, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL),
+    -120.0
+  );
 
   ASSERT_TRUE(created.mouse->button(lvh::MouseButton::middle, true).ok());
   event = wait_for_libinput_event(absolute_context.get(), {LIBINPUT_EVENT_POINTER_BUTTON});

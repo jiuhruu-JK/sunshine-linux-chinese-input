@@ -1,0 +1,33 @@
+.lucide {
+    display: inline-block;
+    height: 1em;
+    vertical-align: -0.125em;
+    width: 1em;
+}
+
+dl.attention {
+    background: var(--bug-color);
+    border-left: 8px solid var(--bug-color-dark);
+    color: var(--bug-color-darker);
+}
+dl.attention dt {
+    color: var(--bug-color-darker);
+}
+dl.important {
+    background: var(--todo-color);
+    border-left: 8px solid var(--todo-color-dark);
+    color: var(--todo-color-darker);
+}
+dl.important dt {
+    color: var(--todo-color-dark);
+}
+
+table.code-result-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+table.code-result-table td {
+    vertical-align: top;
+    width: 50%;
+}
