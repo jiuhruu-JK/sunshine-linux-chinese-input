@@ -44,9 +44,11 @@ ADD_ONLY=(
 # 仓库自有内容，不参与和上游比对
 OWN=(
   README.md
+  HANDOVER.md
   flake.nix
   flake.lock
   upstream-version
+  upstream-baseline
   nix/
   ci/
   .github/
