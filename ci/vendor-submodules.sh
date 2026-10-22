@@ -6,14 +6,19 @@
 # 否则构建出来的产物与上游对不上。
 #
 # 用法：
-#   ci/vendor-submodules.sh check <upstream-ref>   # 只核对，不改动
-#   ci/vendor-submodules.sh apply <upstream-ref>   # 把有差异的子模块重新收录
+#   ci/vendor-submodules.sh check <upstream-ref>        # 只核对，不改动
+#   ci/vendor-submodules.sh apply <upstream-ref>        # 把有差异的子模块重新收录
+#   ci/vendor-submodules.sh apply <upstream-ref> --all  # 全部重新收录（用来查残留）
 #
 # 收录清单记录在 ci/vendored-submodules.txt：每行 "<提交> <路径>"。
 set -euo pipefail
 
 MODE=${1:-check}
 UPSTREAM_REF=${2:-}
+ALL=false
+if [ "${3:-}" = "--all" ]; then
+  ALL=true
+fi
 MANIFEST="$(dirname "$0")/vendored-submodules.txt"
 
 if [ -z "$UPSTREAM_REF" ]; then
@@ -64,7 +69,7 @@ while IFS= read -r path; do
   want=$(upstream_pin "$path")
   [ -z "$want" ] && continue
   have=$(manifest_pin "$path")
-  if [ "$want" != "$have" ]; then
+  if [ "$want" != "$have" ] || [ "$ALL" = true ]; then
     stale+=("$path")
   fi
 done < <(git ls-tree -r --name-only "$UPSTREAM_REF" -- third-party/ packaging/linux/flatpak/deps/ | sort -u)

@@ -1,0 +1,14 @@
+---
+locale: en
+include_search_page: false
+search_index_only: true
+primary: "#2962ff"
+content: "#2e3440"
+light_background: "#ffffff"
+dark_background: "#131416"
+font: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+code_font: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace"
+version: ""
+target_title: ""
+dockle_version: ""
+dockle_url: "https://github.com/LizardByte/dockle"

@@ -1,0 +1,12 @@
+
+if (ch) {}
+
+switch (ch) {}
+
+while (ch) {}
+
+for (;;) {}
+
+void f() = delete("reason");
+
+static_assert(true);

@@ -1,0 +1,13 @@
+
+// `else x =` should not be detected as a variable creation
+if ( O == l )
+  l = O1;
+else
+  a = 01;
+
+// other keyword-led assignments should not be detected as variable creation
+int foo=3;
+return foo=bar;
+return foo = bar;
+yield foo=bar;
+assert foo=bar;

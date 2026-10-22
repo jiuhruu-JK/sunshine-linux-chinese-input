@@ -1,0 +1,26 @@
+'a';
+'\n';
+'\x1A';
+'\u12AS';
+'\U1234ASDF';
+'\\';
+'\'';
+'😭';
+b'a';
+let escaped = '\\';
+println!("after a backslash char literal");
+
+"hello";
+b"hello";
+
+r"hello";
+r###"world"###;
+r##" "###
+"# "##;
+"😭😭😭😭";
+
+br" ";
+br#"hello"#;
+br##"foo"##;
+
+#[error("\" appears in a string")]

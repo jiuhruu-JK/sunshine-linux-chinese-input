@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1000"
+  height="1000"
+  viewBox="0 0 1000 1000"
+  role="img"
+  aria-labelledby="dockle-logo-title dockle-logo-description"
+>
+  <title id="dockle-logo-title">Dockle</title>
+  <desc id="dockle-logo-description">
+    An orange dock between four blue water ripples.
+  </desc>
+  <defs>
+    <linearGradient id="dock" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffad2e" />
+      <stop offset="1" stop-color="#f89a1c" />
+    </linearGradient>
+    <linearGradient id="cobalt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#386fff" />
+      <stop offset="1" stop-color="#2962ff" />
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16c7f5" />
+      <stop offset="1" stop-color="#00b8f0" />
+    </linearGradient>
+  </defs>
+
+  <path
+    fill="url(#dock)"
+    d="M220 120h560c66 0 120 44 120 100s-54 100-120 100H625c-22 0-37 19-34 41l45 404c7 61-41 115-102 115h-68c-61 0-109-54-102-115l45-404c3-22-12-41-34-41H220c-66 0-120-44-120-100s54-100 120-100Z"
+  />
+
+  <path
+    fill="none"
+    stroke="url(#cobalt)"
+    stroke-linecap="round"
+    stroke-width="100"
+    d="M50 410c90-45 155 60 280 35"
+  />
+  <path
+    fill="none"
+    stroke="url(#cyan)"
+    stroke-linecap="round"
+    stroke-width="100"
+    d="M50 610c90-45 160 55 275 10"
+  />
+  <path
+    fill="none"
+    stroke="url(#cyan)"
+    stroke-linecap="round"
+    stroke-width="100"
+    d="M950 410c-90-45-155 60-280 35"
+  />
+  <path
+    fill="none"
+    stroke="url(#cobalt)"
+    stroke-linecap="round"
+    stroke-width="100"
+    d="M950 610c-90-45-160 55-275 10"
+  />
+</svg>

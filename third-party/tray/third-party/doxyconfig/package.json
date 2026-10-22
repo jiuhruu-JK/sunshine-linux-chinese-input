@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@lizardbyte/shared-web": "2026.812.190302",
+    "lucide": "1.45.0"
+  }
+}

@@ -1,0 +1,129 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lizardbyte-dockle"
+version = "0.0.0"
+description = "Build documentation with multiple frameworks and one consistent theme."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+keywords = ["documentation", "doxygen", "jsdoc", "mkdocs", "rustdoc", "sphinx"]
+authors = [
+  { name = "LizardByte" },
+]
+dependencies = [
+  "Markdown>=3.8",
+]
+classifiers = [
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Documentation",
+]
+
+[project.urls]
+Documentation = "https://dockle.readthedocs.io/"
+Issues = "https://github.com/LizardByte/dockle/issues"
+Repository = "https://github.com/LizardByte/dockle"
+
+[project.optional-dependencies]
+sphinx = [
+  "myst-parser>=4.0",
+  "sphinx>=8.1",
+]
+mkdocs = [
+  "mkdocs>=1.6",
+]
+all = [
+  "mkdocs>=1.6",
+  "myst-parser>=4.0",
+  "sphinx>=8.1",
+]
+
+[dependency-groups]
+test = [
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+]
+package = [
+  "pyinstaller==6.22.3",
+  "twine==7.0.0",
+]
+dev = [
+  { include-group = "package" },
+  { include-group = "test" },
+]
+
+[project.scripts]
+dockle = "dockle.cli:main"
+
+[project.entry-points."sphinx.html_themes"]
+dockle = "dockle.sphinx_theme"
+
+[project.entry-points."mkdocs.themes"]
+dockle = "dockle.sphinx.themes.dockle"
+
+[tool.hatch.build]
+artifacts = [
+  "/src/dockle/sphinx/themes/dockle/static/HIGHLIGHT_LICENSE.txt",
+  "/src/dockle/sphinx/themes/dockle/static/LUCIDE_LICENSE.txt",
+  "/src/dockle/sphinx/themes/dockle/static/highlight.min.js",
+  "/src/dockle/sphinx/themes/dockle/static/lucide.min.js",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dockle"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/LICENSE",
+  "/README.md",
+  "/pyproject.toml",
+  "/src",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+  "-rxXs",
+  "--tb=native",
+  "--verbose",
+  "--color=yes",
+  "-p", "no:cacheprovider",
+  "--cov=src/dockle",
+  "--cov-report=term-missing",
+  "--cov-report=xml:coverage/python-coverage.xml",
+  "--junitxml=junit-python.xml",
+  "-o", "junit_family=legacy",
+]
+
+[tool.coverage.run]
+source = ["src/dockle"]
+omit = [
+  "*/tests/*",
+  "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "@abstractmethod",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
