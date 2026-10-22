@@ -2,9 +2,11 @@
   description = "Sunshine 中文输入方案：带 fcitx5 文本桥的 Sunshine 主体 + fcitx5 原生扩展";
 
   inputs = {
-    # 默认跟随 nixpkgs-unstable；使用方可以用 inputs.sunshine-cn-input.inputs.nixpkgs.follows
-    # 把它钉到自己的 nixpkgs 上，保证与系统其它包同一套依赖。
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    # 钉到具体修订（而不是分支）：CI 编出来的产物路径只跟这个修订有关，
+    # 使用方从 Cachix 拉到的二进制才和本仓库一致。
+    # 这个修订的 boost 是 1.89.0，正好满足上游要求的最低版本
+    # （低了就会退回 CPM 去下载 boost，Nix 沙箱里没有网，必然失败）。
+    nixpkgs.url = "github:NixOS/nixpkgs/cd4ea8d57de16f4810bc5f14207bac45fbf19f67";
   };
 
   outputs =
