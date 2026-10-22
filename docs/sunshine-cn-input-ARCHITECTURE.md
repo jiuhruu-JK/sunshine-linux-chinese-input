@@ -132,9 +132,8 @@ Qt wrapper、FHS 路径修正（`/bin/sleep`、`/usr/bin/env systemctl`）。
 ## 7. 不做的事
 
 - 不杀 fcitx5，不重启输入法；
-- 不改 KWin 的 VirtualKeyboard 开关；
-- 不动 KDE 的「虚拟键盘 = 无」这一项 —— 那是桌面会话自己的事，
-  本仓库不越界去改用户的桌面配置；
+- 不改 KWin 的 VirtualKeyboard 开关，也不改桌面会话的输入法归属
+  （那是使用方自己的桌面配置，文本桥不依赖它）；
 - 不改抓屏、编码、权限、音频、网络、WebUI、配置项默认值；
 - 不在本机编译（本机零编译，只在云端 CI 编）。
 

@@ -17,12 +17,16 @@
 
 | 项 | 状态 |
 |---|---|
-| 基线 | 上游 `d1fc311`（master，2026-10-11），祖先关系已用 `git merge -s ours` 接上 |
+| 基线 | 上游 `v2026.1018.5342`（commit `3d6e1d6`），祖先关系已接上（CI 里用 `-s ours` 接的） |
 | 上游同步 | `.github/workflows/sync-upstream.yml` 每日合并上游最新 tag；子模块自动重新收录 |
 | 边界门禁 | `ci/check-boundary.sh`，白名单之外有差异就失败 |
 | 云端编译 | `.github/workflows/nix-build.yml` → nix build + 单元测试 + 推 Cachix |
 | Nix 包 | `sunshine-cn-input`、`fcitx5-sunshine-input`、`sunshine-cn-input-tests` |
 | 收录的第三方 | 按上游指定提交原样收录，清单见 `ci/vendored-submodules.txt` |
+
+上游同步的分工：本机克隆上游是浅克隆，再往前的历史拉不下来，
+带着上游祖先的提交推不上远端。所以仓库里只记基线（`upstream-baseline`），
+祖先关系由云端 CI 用 `-s ours` 接上，再合并上游最新 tag。
 
 ## 3. 相对上游允许的差异
 
@@ -64,8 +68,11 @@ tests/unit/platform/linux/test_input_method.cpp
    但云端 CI 从没成功构建过。第一次跑通前，不要假设它能用。
 2. **本机零编译。** 编译只在云端 CI 跑（见仓库根目录的 `AGENTS.md`）。
    本机要验证行为，先 `nix build` 拉云端产物。
-3. **桌面侧要配合**：KDE「系统设置 → 输入设备 → 虚拟键盘」设为「无」
-   （`~/.config/kwinrc` 的 `[Wayland] VirtualKeyboardEnabled=false`）。
+3. **桌面侧不用配合任何设置。** 文本桥与 KWin 的虚拟键盘开关无关；
+   本方案也不去动 fcitx5 进程与 KWin 的 VirtualKeyboard 开关。
+   （注意：Plasma 6 上「虚拟键盘 = 无、fcitx5 独立跑 text-input-v3」的说法不通用 ——
+   KWin 正是通过「虚拟键盘 = 某个输入法」把 Wayland socket 交给 fcitx5，
+   它才有 IM 角色，原生 Wayland 应用才打得出中文。别把这一项改成「无」。）
 4. **托盘的 Restart 有坑**：上游 `drop_elevated_privileges` 会把 CAP_PERMITTED
    一并清掉，重初始化之后抓屏权限永久丢失。需要重启时用
    `systemctl --user restart sunshine`。

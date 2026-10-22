@@ -35,14 +35,13 @@ sunshine-linux-chinese-input/     ← 标准 fork 布局：上游源码树就在
 于是变成乱码。改完之后文本直接交给输入法，由输入法用 `InputContext::commitString()`
 提交到当前焦点。
 
-## 系统侧要配合一件事
+## 桌面侧不用改
 
-KDE Plasma 的「系统设置 → 输入设备 → 虚拟键盘」要设为 **「无」**。
-KWin 只在虚拟键盘选定输入法时才接管 `text-input` 路由，
-设成「无」之后 fcitx5 走自己的 `text-input-v3`，远程注入与输入法互不干扰。
+文本桥完全在输入法进程内部完成（远程文本 → 套接字 → fcitx5 扩展 →
+`commitString` → 当前焦点窗口），与 KWin 的虚拟键盘开关无关。
 
-本方案**不会**去动这一项：既不杀 fcitx5 进程，也不改 KWin 的 VirtualKeyboard 开关。
-桌面会话的输入法归桌面会话管。
+本方案**不会**去动输入法进程：既不杀 fcitx5，也不改 KWin 的 VirtualKeyboard
+开关。桌面会话的输入法归桌面会话管，是使用方自己的选择。
 
 ## 版本
 

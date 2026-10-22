@@ -80,20 +80,31 @@ cmake --build build -j$(nproc)
 
 Nix 侧：`nix build .#sunshine-cn-input-tests`（云端 CI 里跑）。
 
-## 3. 桌面侧要配合的一件事
+## 3. 桌面侧不需要改动
 
-KDE Plasma 的「系统设置 → 输入设备 → 虚拟键盘」设为 **「无」**。
+文本桥不依赖 KWin 的虚拟键盘开关：
 
-原因：KWin 只在虚拟键盘选定输入法时，才把 `input-method` 协议授予它并接管
-`text-input` 路由；这时远程注入的键鼠和 IME 走同一条链路，会打架。
-设成「无」之后，fcitx5 走 `text-input-v3` 独立工作，远程注入走另一条路，互不干扰。
+```
+远程文本 → Sunshine → 套接字 → fcitx5 扩展 → commitString → 当前焦点窗口
+```
 
-这一项属于桌面会话的配置，本仓库**不去改**它：既不杀 fcitx5，
-也不改 KWin 的 VirtualKeyboard 开关。
+这条链路完全在输入法进程内部完成，KWin 的 VirtualKeyboard 开关是什么值都不影响它。
+
+至于「虚拟键盘设成『无』，让 fcitx5 走独立 text-input-v3」这种说法：
+在 Plasma 6 上并不通用 —— KWin 正是通过「虚拟键盘 = 某个输入法」把 Wayland
+socket fd 交给它拉起的 fcitx5，fcitx5 由此拿到 IM 角色，原生 Wayland 应用
+才拿得到输入上下文。设成「无」之后，fcitx5 拿不到 IM 角色，
+浏览器这类原生 Wayland 应用会打不出中文。
+
+所以：
+
+- 本方案**不去碰**这一项：既不杀 fcitx5，也不改 KWin 的 VirtualKeyboard 开关；
+- 桌面会话的输入法归桌面会话管，是使用方自己的选择；
+- 需要调整时，由使用方在自己的桌面配置里改，不要塞进 Sunshine 或打包层。
 
 > 历史教训：早先的实现会在会话开始时 `kill_all()` 掉所有 fcitx5 实例，
 > 再把 KWin 的 VirtualKeyboard 开关 `false → true` 翻一遍。
-> 这与社区结论相反，会打断用户正在用的输入法，删掉。
+> 这会打断用户正在用的输入法，删掉。
 
 ## 4. 已知坑
 
