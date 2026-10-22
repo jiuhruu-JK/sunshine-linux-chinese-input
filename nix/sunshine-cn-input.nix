@@ -107,7 +107,7 @@ stdenv.mkDerivation (finalAttrs: {
   ui = buildNpmPackage {
     inherit (finalAttrs) src version;
     pname = "sunshine-cn-input-ui";
-    npmDepsHash = "sha256-3y0tSlJhOVBJ7KbGmukpF9s78UX3cPtbhj0cU3OZwP0=";
+    npmDepsHash = "sha256-eOhQxVEV4Nhps1WzN4igI8xdOjXPvGn/fOFCvGemKjc=";
 
     # vite 输出落在 <源码根>/build/assets/web，整份源码树搬进 $out，
     # 主构建再从 $out/build/assets/web 取。
