@@ -19,8 +19,8 @@
 #include <unistd.h>
 
 // local includes
-#include "src/logging.h"
 #include "input_method.h"
+#include "src/logging.h"
 
 using namespace std::literals;
 

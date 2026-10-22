@@ -9,10 +9,10 @@
 // wired into Linux builds only; every other platform keeps upstream behavior.
 #if defined(__linux__)
 
-// standard includes
-#include <filesystem>
-#include <string>
-#include <string_view>
+  // standard includes
+  #include <filesystem>
+  #include <string>
+  #include <string_view>
 
 namespace input_method {
   /**
@@ -20,8 +20,8 @@ namespace input_method {
    */
   enum class submit_result_e {
     unavailable,  ///< The extension is not installed or not reachable.
-    submitted,    ///< The extension committed the text to the focused context.
-    rejected,     ///< The extension refused the text (e.g. no focused context).
+    submitted,  ///< The extension committed the text to the focused context.
+    rejected,  ///< The extension refused the text (e.g. no focused context).
   };
 
   /**
@@ -161,12 +161,12 @@ namespace input_method {
     [[nodiscard]] submit_result_e submit_to_socket(const std::filesystem::path &socket_file, std::string_view text);
   }  // namespace detail
 
-#ifdef SUNSHINE_TESTS
+  #ifdef SUNSHINE_TESTS
   /**
    * @brief Drop the session record (strictly for unit tests).
    */
   void reset_session_state_for_testing();
-#endif
+  #endif
 }  // namespace input_method
 
 #endif  // __linux__

@@ -10,29 +10,29 @@
 
 #ifdef __linux__
 
-// test includes
-#include "../../../tests_common.h"
+  // test includes
+  #include "../../../tests_common.h"
 
-// standard includes
-#include <atomic>
-#include <chrono>
-#include <cstdint>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <thread>
+  // standard includes
+  #include <atomic>
+  #include <chrono>
+  #include <cstdint>
+  #include <cstdlib>
+  #include <cstring>
+  #include <filesystem>
+  #include <optional>
+  #include <string>
+  #include <string_view>
+  #include <thread>
 
-// platform includes
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/un.h>
-#include <unistd.h>
+  // platform includes
+  #include <sys/socket.h>
+  #include <sys/time.h>
+  #include <sys/un.h>
+  #include <unistd.h>
 
-// local includes
-#include "src/platform/linux/input_method.h"
+  // local includes
+  #include "src/platform/linux/input_method.h"
 
 using namespace std::literals;
 
@@ -143,7 +143,9 @@ namespace {
       EXPECT_EQ(::bind(listen_fd_, reinterpret_cast<sockaddr *>(&address), sizeof(address)), 0);
       EXPECT_EQ(::listen(listen_fd_, 4), 0);
 
-      worker_ = std::thread {[this] { serve(); }};
+      worker_ = std::thread {[this] {
+        serve();
+      }};
     }
 
     ~stub_extension_t() {

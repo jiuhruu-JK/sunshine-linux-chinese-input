@@ -45,6 +45,7 @@ ADD_ONLY=(
 OWN=(
   README.md
   flake.nix
+  flake.lock
   upstream-version
   nix/
   ci/

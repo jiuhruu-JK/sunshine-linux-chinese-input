@@ -46,6 +46,20 @@
     {
       packages = forAllSystems packagesFor;
 
+      # 让使用方用 overlay 的方式拿到这两个包（跟系统其它包同一套 nixpkgs）。
+      overlays.default = final: prev: {
+        sunshine-cn-input = final.callPackage ./nix/sunshine-cn-input.nix {
+          inherit version;
+          commit = self.rev;
+          src = ./.;
+        };
+
+        fcitx5-sunshine-input = final.callPackage ./nix/fcitx5-sunshine-input.nix {
+          inherit version;
+          src = ./fcitx5-plugin;
+        };
+      };
+
       # nix flake check 会跑这些。
       checks = forAllSystems (pkgs: {
         inherit (packagesFor pkgs) sunshine-cn-input-tests;
