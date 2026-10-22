@@ -1,8 +1,14 @@
-name: sync-upstream
+name: Sync Upstream
+
+# 每天拉上游 Sunshine 的最新 tag 并合并。
+# 合并策略见 ci/sync-upstream.sh：
+#   - 被升级的子模块自动重新收录；
+#   - .github/workflows/ 保持删除（上游 CI 与本仓库无关）；
+#   - 其它冲突（白名单文件）一律让流水线失败，交人工合并。
 
 on:
   schedule:
-    - cron: '0 0 * * *'      # 每天 00:00 UTC / 北京 08:00
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -12,40 +18,46 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 配置 git
+      - name: Fetch upstream
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/LizardByte/Sunshine.git
+          git fetch upstream --tags --force --prune
 
-      - name: 拉取上游
+      - name: Select newest upstream tag
+        id: select
         run: |
-          git remote add upstream https://github.com/LizardByte/Sunshine.git || true
-          git fetch upstream --tags --force
-
-      - name: 取最新 tag
-        id: tag
-        run: |
-          TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-          echo "取到 $TAG"
+          TAG=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+          if [ -z "$TAG" ]; then
+            echo "::error::没有找到上游 tag"
+            exit 1
+          fi
+          echo "上游最新 tag：$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: 合并上游
-        run: git merge --no-edit "${{ steps.tag.outputs.tag }}"
+      - name: Sync upstream
+        run: ci/sync-upstream.sh "${{ steps.select.outputs.tag }}"
 
-      - name: 边界检查
-        run: bash ci/check-boundary.sh "${{ steps.tag.outputs.tag }}"
+      - name: Boundary check
+        run: ci/check-boundary.sh "${{ steps.select.outputs.tag }}"
 
-      - name: 记录版本
-        run: echo "${{ steps.tag.outputs.tag }}" | sed 's/^v//' > upstream-version
+      - name: Record upstream version
+        run: |
+          echo "${{ steps.select.outputs.tag }}" | sed 's/^v//' > upstream-version
 
-      - name: 提交并打 tag
+      - name: Commit and push
         run: |
           git add -A
-          git diff --quiet && git diff --staged --quiet || git commit -m "sync: upstream ${{ steps.tag.outputs.tag }}"
-          git push
-          git tag -f "${{ steps.tag.outputs.tag }}"
-          git push -f origin "${{ steps.tag.outputs.tag }}"
+          if git diff --staged --quiet; then
+            echo "没有变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore: 同步上游 ${{ steps.select.outputs.tag }}"
+          git push origin main
+          # 让使用方可以用 fork 的 tag 钉住同一个版本
+          git tag -f "${{ steps.select.outputs.tag }}"
+          git push -f origin "${{ steps.select.outputs.tag }}"

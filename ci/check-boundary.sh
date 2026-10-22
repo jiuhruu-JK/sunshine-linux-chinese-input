@@ -122,6 +122,18 @@ while IFS= read -r entry; do
   fi
 done < <(git ls-tree -r "$UPSTREAM_REF" -- third-party/ packaging/linux/flatpak/deps/)
 
+# --- 4. 收录的第三方依赖里不许藏本仓库的改动 -------------------------------
+# third-party/ 与 packaging/linux/flatpak/deps/ 是上游依赖的原样收录快照。
+# 一旦把本仓库的功能实现塞进这些目录，边界门禁就再也看不见它，
+# 上游升级该子模块时还会被静默覆盖。所以这里显式禁止。
+if git grep -l -E 'sunshine-input|SUNSHINE_INPUT|sunshine_input' -- \
+    third-party/ packaging/linux/flatpak/deps/ >/dev/null 2>&1; then
+  echo "::error::收录的第三方依赖里出现了本仓库的文本输入改动；实现必须放在白名单里的本仓库源码"
+  git grep -l -E 'sunshine-input|SUNSHINE_INPUT|sunshine_input' -- \
+    third-party/ packaging/linux/flatpak/deps/ >&2 || true
+  fail=1
+fi
+
 if [ $fail -ne 0 ]; then
   echo "边界检查失败：以上文件不属于文本输入改动范围。" >&2
   exit 1

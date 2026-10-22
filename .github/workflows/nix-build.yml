@@ -1,15 +1,22 @@
-name: nix-build
+name: Nix Build
+
+# 在云端编译并把产物推到 Cachix。
+# 本机零编译（见 AGENTS.md），所以这里是唯一的编译入口。
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
     paths:
       - 'src/**'
       - 'cmake/**'
+      - 'third-party/**'
       - 'fcitx5-plugin/**'
       - 'nix/**'
       - 'flake.nix'
+      - 'flake.lock'
       - 'upstream-version'
+      - '.github/workflows/nix-build.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,14 +26,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: cachix/install-nix-action@v27
+      - name: Install nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
-      - uses: cachix/cachix-action@v15
+      - name: Build packages
+        run: |
+          nix build .#sunshine-cn-input --print-out-paths --no-link
+          nix build .#fcitx5-sunshine-input --print-out-paths --no-link
+
+      - name: Build and run unit tests
+        run: nix build .#sunshine-cn-input-tests --print-out-paths --no-link
+
+      - name: Push to Cachix
+        uses: cachix/cachix-action@v15
         with:
           name: sunshine-cn-input
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
-      - name: 构建并推送缓存
-        run: nix build .#sunshine-cn-input .#fcitx5-sunshine-input --print-build-logs
+          skipPush: ${{ env.SKIP_PUSH }}

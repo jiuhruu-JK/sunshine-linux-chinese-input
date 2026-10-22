@@ -1,77 +1,77 @@
-# sunshine-cn-input —— Sunshine + Linux 中文输入接管
+# sunshine-cn-input —— Sunshine 主体（含中文输入文本桥）
 #
-# packaging/ 层：只描述"怎么编译"，不改任何源码。
-# 源码来自仓库根目录（= 上游 + 文本输入改动），由 flake.nix 传入。
+# packaging/ 层：只描述"怎么编译"，源码来自仓库根目录（src/、third-party/、cmake/ …）。
 #
-# 允许写在这里：源、依赖、构建参数、以及在 Nix 沙箱里编过所需的构建脚手架修补
-# （build-deps 子模块、npm、systemd/udev 路径、Qt wrapper）。
-# 不允许：改抓屏、编码、权限、输入设备、托盘、桌面启动行为。
+# 边界（见 docs/sunshine-cn-input-ARCHITECTURE.md 第 5 节）：
+#   - 本文件只做"Nix 沙箱里编得过"必需的脚手架修补：npm、boost、systemd/udev 路径、
+#     Qt wrapper、以及 FHS 路径修正；
+#   - 不改抓屏方式、编码器、权限模型、输入设备、托盘、桌面图标、启动器语义；
+#   - 文本输入的改动全部落在 src/ 里（第 4.2 节白名单），不靠打包层注入。
 {
   lib,
   stdenv,
-  cmake,
-  fetchFromGitHub,
   fetchzip,
-  autoPatchelfHook,
-  makeWrapper,
+  fetchFromGitHub,
   buildNpmPackage,
+  cmake,
   pkg-config,
   python3,
-  coreutils,
-  wayland-scanner,
-  shaderc,
-  vulkan-loader,
-  vulkan-headers,
   boost,
   curl,
   miniupnpc,
   nlohmann_json,
   openssl,
   libopus,
-  glib,
   qt6,
   avahi,
   libevdev,
   libpulseaudio,
+  libxtst,
+  libxrandr,
+  libxi,
+  libxfixes,
+  libxdmcp,
   libx11,
   libxcb,
-  libxfixes,
-  libxrandr,
-  libxtst,
-  libxi,
   libdrm,
   wayland,
+  wayland-scanner,
   libffi,
   libcap,
+  libgbm,
   pcre2,
   libuuid,
   libselinux,
   libsepol,
   libthai,
   libdatrie,
-  libxdmcp,
   libxkbcommon,
   libepoxy,
   libva,
   libvdpau,
+  libglvnd,
   numactl,
-  libgbm,
   amf-headers,
   svt-av1,
-  pipewire,
+  shaderc,
+  vulkan-loader,
   libnotify,
-  nix-update-script,
+  pipewire,
+  glib,
+  udev,
+  udevCheckHook,
+  autoPatchelfHook,
+  makeWrapper,
+  systemd,
+  coreutils,
 
-  # 由 flake.nix 传入
-  src ? ../.,
   version ? "dev",
   commit ? "unknown",
+  withTests ? false,
+  src ? ../.,
 }:
-
 let
-  inherit (lib) optionals optionalString;
-
-  # fork 基线 v2026.1011.160319 钉住的 build-deps 子模块版本
+  # fork 基线钉住的 build-deps 子模块版本
   # （= LizardByte/build-deps tag v2026.1004.34232）
   buildDepsRev = "bd28fbdd5511da8fc2ef303c381627a390045a78";
 
@@ -84,12 +84,14 @@ let
     aarch64-linux = "Linux-aarch64";
   }.${stdenv.hostPlatform.system} or (throw "sunshine-cn-input: 不支持的系统 ${stdenv.hostPlatform.system}");
 
+  # upstream 的 cmake 在 configure 阶段会去下载预编译 ffmpeg。Nix 构建期不能联网，
+  # 所以用固定输出 derivation 取回来，通过 FFMPEG_PREPARED_BINARIES 指过去。
   ffmpegPrebuilt = fetchzip {
     url = "https://github.com/LizardByte/build-deps/releases/download/${buildDepsTag}/${ffmpegArch}-ffmpeg.tar.gz";
-    # 与 nix-prefetch-url --unpack 的结果一致
     hash = "sha256-YazOwRB6tI543SJ6ijolUKZBTR+o+Z8X3uJchuaArMg=";
   };
 
+  # build-deps 只用到它的 package-lock.cmake（CPM 依赖锁文件），单独取。
   buildDeps = fetchFromGitHub {
     owner = "LizardByte";
     repo = "build-deps";
@@ -99,19 +101,16 @@ let
 in
 stdenv.mkDerivation (finalAttrs: {
   pname = "sunshine-cn-input";
-  inherit version;
+  inherit version src;
 
-  __structuredAttrs = true;
-  strictDeps = true;
-
-  # WebUI 单独构建：fork 仓库的 vite 输出落在 <src>/build/assets/web
+  # ---- WebUI：单独用 npm 构建，再把产物搬进主构建目录 ----
   ui = buildNpmPackage {
-    inherit (finalAttrs) version;
+    inherit (finalAttrs) src version;
     pname = "sunshine-cn-input-ui";
-    # 仓库根目录没有 package-lock.json，WebUI 实际位于 sunshine/ 子目录
-    src = "${finalAttrs.src}";
     npmDepsHash = "sha256-3y0tSlJhOVBJ7KbGmukpF9s78UX3cPtbhj0cU3OZwP0=";
 
+    # vite 输出落在 <源码根>/build/assets/web，整份源码树搬进 $out，
+    # 主构建再从 $out/build/assets/web 取。
     installPhase = ''
       runHook preInstall
 
@@ -122,45 +121,11 @@ stdenv.mkDerivation (finalAttrs: {
     '';
   };
 
-  postPatch = ''
-    # --- 1. 补上缺失的 build-deps 子模块内容 ---------------------------------
-    # fork 仓库没有提交 third-party/build-deps，但 CMakeLists.txt:83 强制 include
-    # 它的 package-lock.cmake。该文件声明 dav1d/libva/opus/nv-codec-headers 的
-    # CPM 依赖；这些在 Linux 下都由预编译 FFmpeg 自带，故只需声明不被触发下载。
-    mkdir -p third-party/build-deps
-    cp ${buildDeps}/package-lock.cmake third-party/build-deps/package-lock.cmake
-
-    # --- 2. WebUI：摘掉 npm 查找，改为单独构建后拷入 -----------------------
-    substituteInPlace cmake/targets/common.cmake \
-      --replace-fail 'find_program(NPM npm REQUIRED)' ""
-
-    # --- 3. Boost：fork 用 find_package(Boost <min> CONFIG COMPONENTS ...) -----
-    # nixpkgs 的 boost 1.89.0 恰好满足 fork 的 BOOST_MINIMUM_VERSION，
-    # 但只提供共享库，必须关掉静态链接。
-    # 同时阻止 Simple-Web-Server 再次 find_package 出 Boost::system。
-    echo 'set(FETCH_CONTENT_BOOST_USED TRUE)' >> cmake/dependencies/Boost_Sunshine.cmake
-
-    # --- 4. 摘掉 systemd / udev 的 FHS 路径查找 -----------------------------
-    substituteInPlace cmake/packaging/linux.cmake \
-      --replace-fail 'find_package(Systemd)' "" \
-      --replace-fail 'find_package(Udev)' ""
-
-    # 桌面图标不再直接 exec sunshine。直接启动会拉起第二个实例去抢
-    # 47984/47989/47990 端口，而它没有 cap_sys_admin，抓屏必然失败，
-    # 还会把正在跑的服务搞得看起来"挂了"。
-    # 改成：确保后台服务在跑 → 打开配置界面。点几次都安全，幂等。
-    substituteInPlace packaging/linux/dev.lizardbyte.app.Sunshine.desktop       --replace-fail '/usr/bin/env systemctl start --u app-@PROJECT_FQDN@' 'sunshine'
-
-    substituteInPlace packaging/linux/app-dev.lizardbyte.app.Sunshine.service.in \
-      --replace-fail '/bin/sleep' '${lib.getExe' coreutils "sleep"}'
-
-
-  '';
-
   nativeBuildInputs = [
     cmake
     pkg-config
-    # glad 的生成器需要 jinja2 + setuptools
+    # glad 的生成器在 configure 阶段需要 Jinja2 / setuptools；
+    # GLAD_SKIP_PIP_INSTALL=ON 让 cmake 不要临时 pip 安装。
     (python3.withPackages (ps: [
       ps.jinja2
       ps.setuptools
@@ -168,7 +133,8 @@ stdenv.mkDerivation (finalAttrs: {
     makeWrapper
     qt6.wrapQtAppsHook
     wayland-scanner
-    shaderc
+    shaderc # configure 阶段编译着色器需要 glslc
+    # 避免与上游 vendored ffmpeg 的库打架
     autoPatchelfHook
   ];
 
@@ -181,97 +147,131 @@ stdenv.mkDerivation (finalAttrs: {
     libopus
     qt6.qtbase
     qt6.qtsvg
-    # input_method.cpp 通过 GIO 与 KWin 的 org.kde.Kwin.VirtualKeyboard 通信
-    glib
-  ]
-  ++ optionals stdenv.hostPlatform.isLinux [
     avahi
     libevdev
     libpulseaudio
+    libxtst
+    libxrandr
+    libxi
+    libxfixes
+    libxdmcp
     libx11
     libxcb
-    libxfixes
-    libxrandr
-    libxtst
-    libxi
     libdrm
     wayland
     libffi
     libcap
+    libgbm
     pcre2
     libuuid
     libselinux
     libsepol
     libthai
     libdatrie
-    libxdmcp
     libxkbcommon
     libepoxy
     libva
     libvdpau
+    libglvnd
     numactl
-    libgbm
     amf-headers
     svt-av1
     vulkan-loader
-    pipewire
     libnotify
+    pipewire
+    glib
   ];
 
-  runtimeDependencies = optionals stdenv.hostPlatform.isLinux [
-    avahi
-    libgbm
-    libxrandr
-    libxcb
-  ];
+  # WebUI 单独构建，主构建不再需要 npm。
+  postPatch = ''
+    substituteInPlace cmake/targets/common.cmake \
+      --replace-fail 'find_program(NPM npm REQUIRED)' ""
+  ''
+  # 用 nixpkgs 的 boost 代替 FetchContent；FETCH_CONTENT_BOOST_USED 阻止
+  # Simple-Web-Server 再次 find_package boost。
+  + ''
+    sed -i -E 's/set\(BOOST_VERSION "[^"]*"\)/set(BOOST_VERSION "${boost.version}")/' \
+      cmake/dependencies/Boost_Sunshine.cmake
+    echo 'set(FETCH_CONTENT_BOOST_USED TRUE)' >> cmake/dependencies/Boost_Sunshine.cmake
+  ''
+  # 沙箱里没有 systemd/udev 的 FHS 目录，改为直接给出安装路径。
+  + lib.optionalString stdenv.hostPlatform.isLinux ''
+    substituteInPlace cmake/packaging/linux.cmake \
+      --replace-fail 'find_package(Systemd)' "" \
+      --replace-fail 'find_package(Udev)' ""
+
+    # systemd 单元里的 /bin/sleep 是 FHS 路径。
+    substituteInPlace packaging/linux/app-dev.lizardbyte.app.Sunshine.service.in \
+      --replace-fail '/bin/sleep' '${lib.getExe' coreutils "sleep"}'
+
+    # 桌面项的 Exec 走 systemd 用户单元，机制保持上游不变，只把 FHS 的
+    # /usr/bin/env systemctl 换成 Nix store 里的 systemctl。
+    substituteInPlace packaging/linux/dev.lizardbyte.app.Sunshine.desktop \
+      --replace-fail '/usr/bin/env systemctl' '${lib.getExe' systemd "systemctl"}'
+  '';
 
   cmakeFlags = [
-    "-Wno-dev"
+    # nixpkgs 的 boost 只提供动态库
     (lib.cmakeBool "BOOST_USE_STATIC" false)
     (lib.cmakeBool "BUILD_DOCS" false)
-    (lib.cmakeBool "BUILD_TESTS" false)
-    # 用系统的 vulkan-headers，避开 build-deps 里的 Vulkan-Headers 子模块
+    (lib.cmakeBool "BUILD_TESTS" withTests)
+    (lib.cmakeBool "SUNSHINE_ENABLE_TRAY" true)
+    (lib.cmakeBool "SUNSHINE_ENABLE_CUDA" false)
+    # 用系统装的 vulkan-headers，不用上游子模块
     (lib.cmakeBool "SUNSHINE_SYSTEM_VULKAN_HEADERS" true)
+    # 本仓库自己的发布信息
     (lib.cmakeFeature "SUNSHINE_PUBLISHER_NAME" "jiuhruu-JK")
-    (lib.cmakeFeature "SUNSHINE_PUBLISHER_WEBSITE" "https://github.com/jiuhruu-JK")
+    (lib.cmakeFeature "SUNSHINE_PUBLISHER_WEBSITE" "https://github.com/jiuhruu-JK/sunshine-linux-chinese-input")
     (lib.cmakeFeature "SUNSHINE_PUBLISHER_ISSUE_URL" "https://github.com/jiuhruu-JK/sunshine-linux-chinese-input/issues")
-    # 避免 cmake 在 configure 阶段联网下载 build-deps 的 ffmpeg tarball
+    # 避免 cmake 在 configure 阶段去下载预编译 ffmpeg
     (lib.cmakeFeature "FFMPEG_PREPARED_BINARIES" "${ffmpegPrebuilt}")
-    # 我们已经提供带 jinja2 的 python，不要 pip 安装
+    # we provide Jinja2/setuptools via python3.withPackages; don't pip-install
     (lib.cmakeBool "GLAD_SKIP_PIP_INSTALL" true)
   ]
-  ++ optionals stdenv.hostPlatform.isLinux [
+  ++ lib.optionals stdenv.hostPlatform.isLinux [
     (lib.cmakeBool "UDEV_FOUND" true)
     (lib.cmakeBool "SYSTEMD_FOUND" true)
     (lib.cmakeFeature "UDEV_RULES_INSTALL_DIR" "lib/udev/rules.d")
     (lib.cmakeFeature "SYSTEMD_USER_UNIT_INSTALL_DIR" "lib/systemd/user")
     (lib.cmakeFeature "SYSTEMD_MODULES_LOAD_DIR" "lib/modules-load.d")
-    # 生成的 systemd unit 的 ExecStart= 用它
+    # 生成的 systemd 单元里的 ExecStart 指向被 wrap 之后的可执行文件
     (lib.cmakeFeature "SUNSHINE_EXECUTABLE_PATH" "${placeholder "out"}/bin/sunshine")
-  ]
-  # 本机是 AMD，始终关 CUDA（fork 默认 SUNSHINE_ENABLE_CUDA=ON，
-  # 找不到 CUDA 编译器时 cmake 会 FATAL_ERROR）
-  ++ [
-    (lib.cmakeBool "SUNSHINE_ENABLE_CUDA" false)
   ];
 
   env = {
-    # 触发 cmake 的版本配置
+    # 触发 cmake 的版本计算
     BUILD_VERSION = finalAttrs.version;
     BRANCH = "master";
     COMMIT = commit;
   };
 
-  # 把 WebUI 产物放到 cmake 期望的位置
-  preBuild = ''
-    mkdir -p assets
-    cp -r ${finalAttrs.ui}/build/assets/web assets/web
+  # build-deps 子模块没有收录进仓库（只用到它的 package-lock.cmake）。
+  prePatch = ''
+    mkdir -p third-party/build-deps
+    cp ${buildDeps}/package-lock.cmake third-party/build-deps/package-lock.cmake
   '';
 
-  buildFlags = [ "sunshine" ];
+  # 把 WebUI 产物搬进 cmake 构建目录（上游从
+  # ${CMAKE_CURRENT_BINARY_DIR}/assets/web 安装它）。
+  preBuild = ''
+    cp -r ${finalAttrs.ui}/build/assets/web ../build/assets/
+  '';
 
-  # 改写 installPhase，避免构建 webui
-  installPhase = ''
+  buildFlags = [
+    "sunshine"
+  ] ++ lib.optional withTests [
+    "test_sunshine"
+  ];
+
+  # 绕开上游的 WebUI 构建（已经单独用 npm 构建过）。
+  # 单元测试变体：跑与文本输入桥相关的用例就装包。
+  installPhase = if withTests then ''
+    runHook preInstall
+
+    ./tests/test_sunshine --gtest_filter='InputMethod*'
+
+    runHook postInstall
+  '' else ''
     runHook preInstall
 
     cmake --install .
@@ -279,31 +279,37 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postInstall
   '';
 
+  # udev 规则由上游原样安装，校验一下（与 nixpkgs 的 sunshine 包一致）。
+  doInstallCheck = stdenv.hostPlatform.isLinux && !withTests;
+  nativeInstallCheckInputs = [ udevCheckHook ];
+
   dontWrapQtApps = true;
 
   postFixup = ''
     wrapProgram $out/bin/sunshine \
-      "''${qtWrapperArgs[@]}" \
-      --set LD_LIBRARY_PATH ${lib.makeLibraryPath [ vulkan-loader ]}
+      "''${qtWrapperArgs[@]}"
 
-    # KWin 对 zkde_screencast_unstable_v1 做权限校验：拿 /proc/<pid>/exe 的
-    # 真实路径去匹配 XDG data 里 .desktop 的 Exec=。wrapProgram 之后进程真实
-    # 可执行文件是 bin/.sunshine-wrapped，而包自带的 kwin.desktop 写的是
-    # bin/sunshine，两者对不上 → KWin 拒绝绑定 → Sunshine 报
-    # "zkde_screencast_unstable_v1 not found in registry"。
-    substituteInPlace $out/share/applications/dev.lizardbyte.app.Sunshine.kwin.desktop \
-      --replace-fail "$out/bin/sunshine" "$out/bin/.sunshine-wrapped"
+    # KWin 的 zkde_screencast 按 .desktop 里的 Exec 与 /proc/<pid>/exe 比对，
+    # wrap 之后真实路径是 .sunshine-wrapped，这里同步改掉，
+    # 否则 KWin 会拒绝给 Sunshine 抓屏权限。
+    if [ -f "$out/share/applications/dev.lizardbyte.app.Sunshine.kwin.desktop" ]; then
+      substituteInPlace "$out/share/applications/dev.lizardbyte.app.Sunshine.kwin.desktop" \
+        --replace-fail "$out/bin/sunshine" "$out/bin/.sunshine-wrapped"
+    fi
   '';
 
-  doInstallCheck = false;
-
-  passthru.updateScript = nix-update-script { };
+  runtimeDependencies = [
+    libglvnd
+  ];
 
   meta = {
-    description = "魔改版 Sunshine：带自愈式输入法接管桥的游戏串流主机";
+    description = "Game stream host for Moonlight, with a fcitx5 text input bridge";
     homepage = "https://github.com/jiuhruu-JK/sunshine-linux-chinese-input";
     license = lib.licenses.gpl3Only;
+    platforms = [
+      "x86_64-linux"
+      "aarch64-linux"
+    ];
     mainProgram = "sunshine";
-    platforms = [ "x86_64-linux" "aarch64-linux" ];
   };
 })

@@ -1,0 +1,15 @@
+# Ignore JetBrains IDE files
+.idea/
+
+# Ignore build directories
+build/
+cmake-build-*/
+
+# npm
+node_modules/
+
+# ignore doxyconfig files
+docs/doxyconfig*
+
+# ignore fake third-party directory
+third-party/
