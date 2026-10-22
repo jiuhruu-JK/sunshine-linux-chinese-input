@@ -37,6 +37,16 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/LizardByte/Sunshine.git || true
+          git fetch upstream --force --depth=1 "$(cat upstream-baseline)"
+
+      - name: Check vendored dependencies
+        # 收录的第三方依赖必须与上游 pin 逐字节一致：
+        # 既不许在收录目录里塞本仓库的改动，也不许上游 pin 变了没跟上。
+        run: ci/check-vendored.sh "$(cat upstream-baseline)"
+
       - name: Build packages
         run: |
           nix build .#sunshine-cn-input --print-out-paths --no-link

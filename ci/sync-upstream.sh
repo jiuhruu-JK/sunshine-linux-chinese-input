@@ -124,4 +124,7 @@ fi
 # --- 记录新的基线 --------------------------------------------------------
 git rev-parse "$TAG^{commit}" >"$baseline_file"
 
+# 刷新上游 README 副本（本仓库的 README.md 是仓库自有的，上游那份放 docs/）
+git show "$TAG:README.md" >docs/UPSTREAM-README.md
+
 echo "同步完成：$TAG（基线 $(cat "$baseline_file")）"

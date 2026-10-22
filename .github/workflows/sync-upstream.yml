@@ -50,6 +50,9 @@ jobs:
       - name: Boundary check
         run: ci/check-boundary.sh "${{ steps.select.outputs.tag }}"
 
+      - name: Check vendored dependencies
+        run: ci/check-vendored.sh "${{ steps.select.outputs.tag }}"
+
       - name: Record upstream version
         run: |
           echo "${{ steps.select.outputs.tag }}" | sed 's/^v//' > upstream-version
