@@ -63,6 +63,8 @@ jobs:
           fi
           git commit -m "chore: 同步上游 ${{ steps.select.outputs.tag }}"
           git push origin main
-          # 让使用方可以用 fork 的 tag 钉住同一个版本
-          git tag -f "${{ steps.select.outputs.tag }}"
-          git push -f origin "${{ steps.select.outputs.tag }}"
+          # 标记「同步到了上游哪个版本」。
+          # 刻意用 upstream/ 前缀：与上游同名的 tag 会盖住上游的同名 tag，
+          # 之后 `git diff <tag>` 比的就不是上游的树了，边界门禁会形同虚设。
+          git tag -f "upstream/${{ steps.select.outputs.tag }}"
+          git push -f origin "upstream/${{ steps.select.outputs.tag }}"
