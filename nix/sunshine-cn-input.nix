@@ -285,7 +285,8 @@ stdenv.mkDerivation (finalAttrs: {
 
   dontWrapQtApps = true;
 
-  postFixup = ''
+  # 单元测试变体不产出 sunshine 可执行文件，不用 wrap。
+  postFixup = lib.optionalString (!withTests) ''
     wrapProgram $out/bin/sunshine \
       "''${qtWrapperArgs[@]}"
 
