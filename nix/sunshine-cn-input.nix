@@ -264,11 +264,12 @@ stdenv.mkDerivation (finalAttrs: {
   ];
 
   # 绕开上游的 WebUI 构建（已经单独用 npm 构建过）。
-  # 单元测试变体：跑与文本输入桥相关的用例就装包。
+  # 单元测试变体：跑与文本输入桥相关的用例，并把结果装进 $out。
   installPhase = if withTests then ''
     runHook preInstall
 
-    ./tests/test_sunshine --gtest_filter='InputMethod*'
+    mkdir -p "$out/share/sunshine-cn-input"
+    ./tests/test_sunshine --gtest_filter='InputMethod*' 2>&1 | tee "$out/share/sunshine-cn-input/test-results.txt"
 
     runHook postInstall
   '' else ''
@@ -278,6 +279,10 @@ stdenv.mkDerivation (finalAttrs: {
 
     runHook postInstall
   '';
+
+  # 上游的测试工程没有注册 ctest 用例，make check 会因为「没找到测试」而失败；
+  # 我们自己在 installPhase 里直接跑测试二进制。
+  dontCheck = withTests;
 
   # udev 规则由上游原样安装，校验一下（与 nixpkgs 的 sunshine 包一致）。
   doInstallCheck = stdenv.hostPlatform.isLinux && !withTests;

@@ -49,11 +49,11 @@ jobs:
 
       - name: Build packages
         run: |
-          nix build .#sunshine-cn-input --print-out-paths --no-link
-          nix build .#fcitx5-sunshine-input --print-out-paths --no-link
+          nix build .#sunshine-cn-input --print-out-paths --no-link --print-build-logs
+          nix build .#fcitx5-sunshine-input --print-out-paths --no-link --print-build-logs
 
       - name: Build and run unit tests
-        run: nix build .#sunshine-cn-input-tests --print-out-paths --no-link
+        run: nix build .#sunshine-cn-input-tests --print-out-paths --no-link --print-build-logs
 
       - name: Push to Cachix
         uses: cachix/cachix-action@v15
