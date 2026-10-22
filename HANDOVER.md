@@ -70,10 +70,10 @@ tests/unit/platform/linux/test_input_method.cpp
    本机要验证行为，先 `nix build` 拉云端产物。
 3. **桌面侧不用配合任何设置。** 文本桥与 KWin 的虚拟键盘开关无关；
    本方案也不去动 fcitx5 进程与 KWin 的 VirtualKeyboard 开关。
-   KDE Plasma 6 上让 fcitx5 拿到 IM 角色有两条路：KWin 托管（「虚拟键盘 = Fcitx 5」，
-   本机走这条，已调通）或独立运行（「虚拟键盘 = 无」，但独立启动的 fcitx5 得自己
-   拿到 WAYLAND_DISPLAY/WAYLAND_SOCKET，连不上合成器就没有输入上下文）。
-   两条都行，是使用方自己的桌面配置，别塞进 Sunshine 或打包层。
+   KDE Plasma 6 Wayland 上，社区标准做法是「虚拟键盘 = Fcitx 5」（由 KWin 拉起
+   fcitx5，ArchWiki《Fcitx5》与 Fcitx 官方 wiki《Setup Fcitx 5》都这么写），
+   本机走的正是这条。设成「无」的话 KWin 就不拉 fcitx5，独立跑的 fcitx5
+   拿不到 Wayland socket，就没有 IM 角色，浏览器会打不出中文。
 4. **托盘的 Restart 有坑**：上游 `drop_elevated_privileges` 会把 CAP_PERMITTED
    一并清掉，重初始化之后抓屏权限永久丢失。需要重启时用
    `systemctl --user restart sunshine`。
