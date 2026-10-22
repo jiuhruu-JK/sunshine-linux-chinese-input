@@ -476,6 +476,64 @@ class ThemeTests(unittest.TestCase):
             self.assertEqual(first, 1)
             self.assertEqual(second, 0)
 
+    def test_doxygen_settings_use_all_navtree_shards_and_refresh_idempotently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "index.html").write_text(
+                "<html><head></head><body></body></html>", encoding="utf-8"
+            )
+            cookie_file = output / "cookie.js"
+            cookie_file.write_text("let Cookie = {}", encoding="utf-8")
+            first_index = output / "navtreeindex0.js"
+            first_index.write_text(
+                'var NAVTREEINDEX0 =\n{\n"index.html":[],\n'
+                '"usage.html#details":[0],\n"usage.html#other":[0]\n};',
+                encoding="utf-8",
+            )
+            second_index = output / "navtreeindex1.js"
+            second_index.write_text(
+                'var NAVTREEINDEX1 =\n{\n"d0/d00/source.html#l1":[1],\n'
+                + json.dumps('café"page.html') + ':[2]\n};',
+                encoding="utf-8",
+            )
+
+            apply_theme(output, "doxygen", "body {}")
+            patched = cookie_file.read_text(encoding="utf-8")
+            expected_pages = json.dumps([
+                'café"page.html', "d0/d00/source.html", "index.html", "usage.html"
+            ])
+            self.assertTrue(patched.startswith("let Cookie = {};\n"))
+            self.assertIn(f"const dockleDoxygenNavigationPages = {expected_pages};", patched)
+            self.assertNotIn("/* dockle-doxygen-navigation-pages */", patched)
+            self.assertEqual(apply_theme(output, "doxygen", "body {}"), 0)
+            self.assertEqual(cookie_file.read_text(encoding="utf-8"), patched)
+
+            first_index.write_text(
+                'var NAVTREEINDEX0 =\n{\n"index.html":[]\n};', encoding="utf-8"
+            )
+            second_index.unlink()
+            apply_theme(output, "doxygen", "body {}")
+            refreshed = cookie_file.read_text(encoding="utf-8")
+            self.assertIn('const dockleDoxygenNavigationPages = ["index.html"];', refreshed)
+            self.assertNotIn('"usage.html"', refreshed)
+            self.assertEqual(refreshed.count("/* dockle-doxygen-settings */"), 1)
+            self.assertEqual(refreshed.count("Cookie.readSetting ="), 1)
+
+    def test_other_frameworks_preserve_cookie_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "index.html").write_text(
+                "<html><head></head><body></body></html>", encoding="utf-8"
+            )
+            cookie_file = output / "cookie.js"
+            cookie_file.write_text("unrelated cookie script", encoding="utf-8")
+
+            apply_theme(output, "jsdoc", "body {}")
+
+            self.assertEqual(
+                cookie_file.read_text(encoding="utf-8"), "unrelated cookie script"
+            )
+
     def test_apply_theme_rejects_malformed_html(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)

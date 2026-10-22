@@ -13,6 +13,7 @@ export default [
       'coverage/**',
       'node_modules/**',
       'src/dockle/sphinx/themes/dockle/static/lucide.min.js',
+      'tests-js/fixtures/doxygen-cookie.js',
     ],
   },
   js.configs.recommended,
@@ -38,7 +39,10 @@ export default [
     },
   },
   {
-    files: ['src/dockle/sphinx/themes/dockle/static/dockle.js'],
+    files: [
+      'src/dockle/sphinx/themes/dockle/static/dockle.js',
+      'src/dockle/sphinx/themes/dockle/static/doxygen-settings.js',
+    ],
     languageOptions: {
       globals: globals.browser,
     },

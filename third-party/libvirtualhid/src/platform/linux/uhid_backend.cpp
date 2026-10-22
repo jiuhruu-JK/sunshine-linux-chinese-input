@@ -114,6 +114,7 @@ namespace lvh::detail {
 #if defined(__linux__)
     namespace ps = playstation_feature_reports;
     constexpr auto playstation_periodic_report_ms = 10;
+    constexpr auto switch_pro_periodic_report_ms = 15;
     constexpr auto uhid_start_timeout = std::chrono::seconds {5};
 
     constexpr std::uint16_t xbox_bluetooth_version = 0x0513;
@@ -383,6 +384,25 @@ namespace lvh::detail {
     }
 
 #if defined(__linux__)
+    /**
+     * @brief Select a kernel HID vendor identity that keeps virtual Xbox devices on hid-generic.
+     *
+     * Linux matches HID drivers and names their sysfs devices using 32-bit vendor
+     * IDs. Mark the upper word so physical Xbox drivers and xpadneo's udev rules
+     * cannot claim these devices and consume Guide chords. The evdev and hidraw
+     * ABIs, including SDL HIDAPI's uevent parser, expose the original lower
+     * 16-bit vendor ID, preserving Xbox discovery, rumble, and battery reports.
+     *
+     * @param profile UHID transport profile.
+     * @return Kernel vendor ID with the virtual marker for Xbox One and Series.
+     */
+    std::uint32_t uhid_vendor_id(const DeviceProfile &profile) {
+      constexpr std::uint32_t virtual_xbox_vendor_marker = 0x00010000U;
+      return is_xbox_uhid_profile(profile.gamepad_kind) ?
+               virtual_xbox_vendor_marker | profile.vendor_id :
+               profile.vendor_id;
+    }
+
     std::uint16_t to_uhid_bus(const DeviceProfile &profile) {
       // Linux SDL2 HIDAPI requires BUS_USB hidraw devices to have a physical USB
       // parent in sysfs. UHID devices do not, so expose transports handled by
@@ -1184,6 +1204,10 @@ namespace lvh::detail {
         }
       }
 
+      if (const auto status = enable_evdev_type(device, EV_REL, "relative mouse events"); !status.ok()) {
+        return status;
+      }
+
       if (kind == UinputMouseDeviceKind::absolute) {
         if (const auto status = enable_evdev_property(device, INPUT_PROP_DIRECT, "direct input"); !status.ok()) {
           return status;
@@ -1197,16 +1221,14 @@ namespace lvh::detail {
           return status;
         }
         auto y = make_absinfo(0, absolute_axis_max);
-        return enable_evdev_code(device, EV_ABS, ABS_Y, "absolute mouse axis", &y);
-      }
-
-      if (const auto status = enable_evdev_type(device, EV_REL, "relative mouse events"); !status.ok()) {
-        return status;
-      }
-
-      for (const auto code : {REL_X, REL_Y}) {
-        if (const auto status = enable_evdev_code(device, EV_REL, code, "relative mouse axis"); !status.ok()) {
+        if (const auto status = enable_evdev_code(device, EV_ABS, ABS_Y, "absolute mouse axis", &y); !status.ok()) {
           return status;
+        }
+      } else {
+        for (const auto code : {REL_X, REL_Y}) {
+          if (const auto status = enable_evdev_code(device, EV_REL, code, "relative mouse axis"); !status.ok()) {
+            return status;
+          }
         }
       }
 
@@ -1720,6 +1742,11 @@ namespace lvh::detail {
 
     /**
      * @brief Backend mouse backed by separate relative and absolute Linux uinput devices.
+     *
+     * Both devices expose legacy and available high-resolution wheel axes.
+     * Relative motion axes are exposed only by the relative device.
+     * Wheel events follow the last successful motion submission, defaulting
+     * to the relative device before any successful motion submission.
      */
     class UinputMouse final: public BackendMouse {
     public:
@@ -1915,19 +1942,19 @@ namespace lvh::detail {
         std::uint16_t legacy_code,
         std::optional<std::uint16_t> high_resolution_code
       ) {
-        auto &relative = device(UinputMouseDeviceKind::relative);
+        auto &target = device(last_motion_device_);
         const auto converted = accumulated_legacy_scroll(remainder, distance);
         if (converted.detents != 0) {
-          if (const auto status = relative.emit(EV_REL, legacy_code, converted.detents); !status.ok()) {
+          if (const auto status = target.emit(EV_REL, legacy_code, converted.detents); !status.ok()) {
             return status;
           }
         }
         if (high_resolution_code.has_value()) {
-          if (const auto status = relative.emit(EV_REL, *high_resolution_code, distance); !status.ok()) {
+          if (const auto status = target.emit(EV_REL, *high_resolution_code, distance); !status.ok()) {
             return status;
           }
         }
-        if (const auto status = relative.synchronize(); !status.ok()) {
+        if (const auto status = target.synchronize(); !status.ok()) {
           return status;
         }
         remainder = converted.remainder;
@@ -3161,7 +3188,7 @@ namespace lvh::detail {
         copy_string(request.uniq, unique_id_);
         request.rd_size = static_cast<std::uint16_t>(transport_profile.report_descriptor.size());
         request.bus = to_uhid_bus(transport_profile);
-        request.vendor = transport_profile.vendor_id;
+        request.vendor = uhid_vendor_id(transport_profile);
         request.product = transport_profile.product_id;
         request.version = transport_profile.version;
         std::memcpy(
@@ -3196,7 +3223,7 @@ namespace lvh::detail {
           return status;
         }
 
-        if (is_playstation_profile(profile_.gamepad_kind)) {
+        if (is_playstation_profile(profile_.gamepad_kind) || profile_.gamepad_kind == GamepadProfileKind::switch_pro) {
           periodic_reporter_ = std::jthread {[this](std::stop_token stop_token) {
             periodic_report_loop(stop_token);
           }};
@@ -3239,6 +3266,11 @@ namespace lvh::detail {
         return nodes;
       }
 
+      /**
+       * @brief Stop report and output workers before destroying the UHID device.
+       *
+       * @return Status of UHID destruction and file descriptor closure.
+       */
       OperationStatus close() override {
         if (!open_.exchange(false)) {
           return OperationStatus::success();
@@ -3252,18 +3284,18 @@ namespace lvh::detail {
           reader_.request_stop();
         }
 
-        auto status = OperationStatus::success();
-        if (fd_ >= 0) {
-          uhid_event event {};
-          event.type = UHID_DESTROY;
-          status = write_event(event);
-        }
-
         if (periodic_reporter_.joinable()) {
           periodic_reporter_.join();
         }
         if (reader_.joinable()) {
           reader_.join();
+        }
+
+        auto status = OperationStatus::success();
+        if (fd_ >= 0) {
+          uhid_event event {};
+          event.type = UHID_DESTROY;
+          status = write_event(event);
         }
 
         if (fd_ >= 0) {
@@ -3408,9 +3440,22 @@ namespace lvh::detail {
         return OperationStatus::success();
       }
 
+      /**
+       * @brief Stream the latest state at the profile's native interval, including while idle.
+       *
+       * Switch Pro HIDAPI clients need continuous full-state reports to avoid an idle disconnect.
+       * Repacking each report advances its packet timer and preserves the latest buttons and IMU samples.
+       *
+       * @param stop_token Cancellation token signalled when the UHID device closes.
+       */
       void periodic_report_loop(std::stop_token stop_token) {
+        const auto interval = std::chrono::milliseconds {
+          profile_.gamepad_kind == GamepadProfileKind::switch_pro ?
+            switch_pro_periodic_report_ms :
+            playstation_periodic_report_ms
+        };
         while (!stop_token.stop_requested() && running_) {
-          std::this_thread::sleep_for(std::chrono::milliseconds {playstation_periodic_report_ms});
+          std::this_thread::sleep_for(interval);
           if (stop_token.stop_requested() || !running_ || !open_) {
             break;
           }

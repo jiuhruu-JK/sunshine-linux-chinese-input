@@ -103,6 +103,11 @@ _BLOCKQUOTE_PREFIX = re.compile(r"^(?: {0,3}>[ \t]?)+(?P<content>.*)$")
 _DOCKLE_URL = "https://github.com/LizardByte/dockle"
 _CSS_ASSET = "dockle.css"
 _SCRIPT_ASSET = "dockle.js"
+_DOXYGEN_SETTINGS_ASSET = "doxygen-settings.js"
+_DOXYGEN_SETTINGS_MARKER = "\n/* dockle-doxygen-settings */\n"
+_DOXYGEN_NAVIGATION_KEY = re.compile(
+    r'^\s*("(?:[^"\\]|\\.)*")\s*:', re.MULTILINE
+)
 _LUCIDE_ASSET = "lucide.min.js"
 _HIGHLIGHT_ASSET = "highlight.min.js"
 _INDEX_FILE = "index.html"
@@ -509,6 +514,8 @@ def apply_theme(
             f"{framework} did not generate any HTML files in {output}"
         )
 
+    if framework == "doxygen":
+        _configure_doxygen_settings(output)
     asset_dir = _write_theme_assets(output, stylesheet)
     logo_asset = _copy_logo(logo, asset_dir)
     favicon_asset = _copy_favicon(favicon, asset_dir)
@@ -584,6 +591,32 @@ def apply_theme(
     )
     (output / _SEARCH_PAGE).write_text(search_page, encoding="utf-8")
     return themed
+
+
+def _configure_doxygen_settings(output: Path) -> None:
+    """Scope settings and reject missing navtree pages before initialization."""
+
+    cookie_file = output / "cookie.js"
+    if not cookie_file.is_file():
+        return
+    navigation_pages = sorted({
+        json.loads(match.group(1)).split("#", 1)[0]
+        for index_file in output.glob("navtreeindex*.js")
+        for match in _DOXYGEN_NAVIGATION_KEY.finditer(
+            index_file.read_text(encoding="utf-8")
+        )
+    })
+    runtime = _theme_asset(_DOXYGEN_SETTINGS_ASSET).read_text(encoding="utf-8")
+    configuration = (
+        f"const dockleDoxygenNavigationPages = {json.dumps(navigation_pages)};\n"
+    )
+    original = cookie_file.read_text(encoding="utf-8")
+    source = original.partition(_DOXYGEN_SETTINGS_MARKER)[0].rstrip()
+    if not source.endswith(";"):
+        source += ";"
+    updated = source + _DOXYGEN_SETTINGS_MARKER + configuration + runtime
+    if updated != original:
+        cookie_file.write_text(updated, encoding="utf-8")
 
 
 def _write_theme_assets(output: Path, stylesheet: str) -> Path:

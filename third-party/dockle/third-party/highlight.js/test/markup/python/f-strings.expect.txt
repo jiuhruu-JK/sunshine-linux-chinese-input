@@ -1,0 +1,36 @@
+<span class="hljs-string">f&#x27;<span class="hljs-subst">{name}</span>&#x27;</span>
+<span class="hljs-string">f&quot;<span class="hljs-subst">{<span class="hljs-built_in">len</span>(name) + <span class="hljs-number">5</span>}</span>&quot;</span>
+<span class="hljs-meta">&gt;&gt;&gt; </span><span class="hljs-string">f&quot;&quot;&quot;
+<span class="hljs-meta">... </span><span class="hljs-subst">{
+<span class="hljs-meta">... </span>   name
+<span class="hljs-meta">... </span>}</span>
+<span class="hljs-meta">... </span>&quot;&quot;&quot;</span>
+<span class="hljs-string">rf&quot;<span class="hljs-subst">{name}</span>&quot;</span>
+<span class="hljs-string">fr&quot;<span class="hljs-subst">{name}</span>&quot;</span>
+<span class="hljs-string">f&quot;<span class="hljs-subst">{name + <span class="hljs-string">f&#x27;<span class="hljs-subst">{name}</span>&#x27;</span>}</span>&quot;</span>
+<span class="hljs-string">f&quot;{{ }}&quot;</span>
+<span class="hljs-keyword">if</span><span class="hljs-string">&quot;text&quot;</span>==<span class="hljs-string">&quot;text&quot;</span>:
+    <span class="hljs-string">&quot;good&quot;</span>
+<span class="hljs-string">rf&quot;https://www.<span class="hljs-subst">{domain}</span>.com&quot;</span>
+<span class="hljs-meta">&gt;&gt;&gt; </span><span class="hljs-string">fr&quot;&quot;&quot;
+<span class="hljs-meta">... </span>https://www.example.com/{{age}/360}
+...
+&quot;&quot;&quot;</span>
+<span class="hljs-string">br&quot;https://&quot;</span>
+<span class="hljs-keyword">or</span> <span class="hljs-string">br&quot;https://&quot;</span>
+<span class="hljs-string">rb&quot;https://&quot;</span>
+<span class="hljs-keyword">or</span> <span class="hljs-string">rb&quot;https://&quot;</span>
+test()<span class="hljs-keyword">or</span><span class="hljs-string">&quot;&quot;</span>
+
+<span class="hljs-string">&quot;my ...
+... name&quot;</span>
+<span class="hljs-meta">&gt;&gt;&gt; </span><span class="hljs-string">&quot;my ...
+... name&quot;</span>
+
+<span class="hljs-built_in">print</span>(<span class="hljs-string">&quot;kkds&quot;</span>+<span class="hljs-string">&quot;kdjsa&quot;</span>)
+<span class="hljs-built_in">print</span>(<span class="hljs-string">&quot;kkds&quot;</span>+<span class="hljs-string">b&quot;kdjsa&quot;</span>)
+<span class="hljs-built_in">print</span>(test()<span class="hljs-keyword">or</span><span class="hljs-string">&quot;kdjs&quot;</span>)
+<span class="hljs-built_in">print</span>(test()<span class="hljs-keyword">or</span> <span class="hljs-string">&quot;kdjs&quot;</span>)
+<span class="hljs-built_in">print</span>(test()<span class="hljs-keyword">or</span> <span class="hljs-string">f&quot;kdjs&quot;</span>)
+test()<span class="hljs-keyword">or</span><span class="hljs-string">&quot;me&quot;</span>
+<span class="hljs-built_in">print</span>(test()<span class="hljs-keyword">or</span><span class="hljs-string">&quot;me&quot;</span>)

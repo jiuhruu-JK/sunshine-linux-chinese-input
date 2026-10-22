@@ -46,6 +46,19 @@ namespace {
     }
     return pressed_codes;
   }
+
+  std::vector<std::int32_t> relative_axis_values(
+    const std::vector<lvh::detail::test::LinuxInputEventRecord> &events,
+    std::uint16_t code
+  ) {
+    std::vector<std::int32_t> values;
+    for (const auto &event : events) {
+      if (event.type == EV_REL && event.code == code) {
+        values.push_back(event.value);
+      }
+    }
+    return values;
+  }
 }  // namespace
 
 TEST_F(LinuxBackendTest, TranslatesKeyboardKeys) {
@@ -748,6 +761,28 @@ TEST_F(LinuxBackendTest, PipeBackedUinputMouseRoutesMotionAndButtonsAcrossSplitD
   }));
 }
 
+TEST_F(LinuxBackendTest, PipeBackedUinputMouseScrollsOnLastMotionDevice) {
+  using enum lvh::MouseEventKind;
+
+  const std::vector<lvh::MouseEvent> events {
+    {.kind = absolute_motion, .x = 50, .y = 25, .width = 100, .height = 100},
+    {.kind = vertical_scroll, .high_resolution_scroll = 120},
+    {.kind = horizontal_scroll, .high_resolution_scroll = -120},
+    {.kind = relative_motion, .x = 5, .y = -2},
+    {.kind = vertical_scroll, .high_resolution_scroll = -120},
+  };
+  const auto result = lvh::detail::test::linux_uinput_mouse_submit_split_pipe_sequence(events);
+  ASSERT_TRUE(result.status.ok()) << result.status.message();
+
+  EXPECT_EQ(relative_axis_values(result.absolute_events, REL_WHEEL), (std::vector<std::int32_t> {1}));
+  EXPECT_EQ(relative_axis_values(result.absolute_events, REL_HWHEEL), (std::vector<std::int32_t> {-1}));
+  EXPECT_EQ(relative_axis_values(result.relative_events, REL_WHEEL), (std::vector<std::int32_t> {-1}));
+#if defined(REL_WHEEL_HI_RES)
+  EXPECT_EQ(relative_axis_values(result.absolute_events, REL_WHEEL_HI_RES), (std::vector<std::int32_t> {120}));
+  EXPECT_EQ(relative_axis_values(result.relative_events, REL_WHEEL_HI_RES), (std::vector<std::int32_t> {-120}));
+#endif
+}
+
 TEST_F(LinuxBackendTest, PipeBackedUinputMouseAccumulatesLegacyScrollDetentsPerAxis) {
   const std::vector<lvh::MouseEvent> events {
     {.kind = lvh::MouseEventKind::vertical_scroll, .high_resolution_scroll = 60},
@@ -758,23 +793,13 @@ TEST_F(LinuxBackendTest, PipeBackedUinputMouseAccumulatesLegacyScrollDetentsPerA
   const auto result = lvh::detail::test::linux_uinput_mouse_submit_pipe_sequence(events);
   ASSERT_TRUE(result.status.ok()) << result.status.message();
 
-  const auto event_values = [&result](std::uint16_t code) {
-    std::vector<std::int32_t> values;
-    for (const auto &event : result.events) {
-      if (event.type == EV_REL && event.code == code) {
-        values.push_back(event.value);
-      }
-    }
-    return values;
-  };
-
-  EXPECT_EQ(event_values(REL_WHEEL), (std::vector<std::int32_t> {1}));
-  EXPECT_EQ(event_values(REL_HWHEEL), (std::vector<std::int32_t> {-1}));
+  EXPECT_EQ(relative_axis_values(result.events, REL_WHEEL), (std::vector<std::int32_t> {1}));
+  EXPECT_EQ(relative_axis_values(result.events, REL_HWHEEL), (std::vector<std::int32_t> {-1}));
 #if defined(REL_WHEEL_HI_RES)
-  EXPECT_EQ(event_values(REL_WHEEL_HI_RES), (std::vector<std::int32_t> {60, 60}));
+  EXPECT_EQ(relative_axis_values(result.events, REL_WHEEL_HI_RES), (std::vector<std::int32_t> {60, 60}));
 #endif
 #if defined(REL_HWHEEL_HI_RES)
-  EXPECT_EQ(event_values(REL_HWHEEL_HI_RES), (std::vector<std::int32_t> {-60, -60}));
+  EXPECT_EQ(relative_axis_values(result.events, REL_HWHEEL_HI_RES), (std::vector<std::int32_t> {-60, -60}));
 #endif
   EXPECT_EQ(
     std::ranges::count_if(result.events, [](const auto &event) {
@@ -955,6 +980,12 @@ TEST_F(LinuxBackendTest, XboxOneAndSeriesPreferBluetoothUhidWithUinputFallback) 
     EXPECT_TRUE(result.creation.saw_create);
     EXPECT_TRUE(result.creation.waited_for_start);
     EXPECT_TRUE(result.xbox.saw_transport_descriptor);
+    // The kernel must not match Microsoft's physical-device driver IDs, while
+    // the 16-bit input and hidraw identities must still identify an Xbox.
+    EXPECT_EQ(result.creation.vendor_id, 0x0001045EU);
+    EXPECT_NE(result.creation.vendor_id, 0x045EU);
+    EXPECT_EQ(static_cast<std::uint16_t>(result.creation.vendor_id), 0x045EU);
+    EXPECT_EQ(result.creation.product_id, kind == xbox_series ? 0x0B13U : 0x0B20U);
     EXPECT_TRUE(result.xbox.saw_battery_descriptor);
     EXPECT_TRUE(result.xbox.saw_canonical_evdev_axes);
     EXPECT_TRUE(result.xbox.saw_gamepad_application_usage);
@@ -1003,19 +1034,43 @@ TEST_F(LinuxBackendTest, SocketpairBackedSwitchProUsesNativeUhidProtocol) {
   EXPECT_TRUE(result.creation.saw_create);
   EXPECT_TRUE(result.creation.waited_for_start);
   EXPECT_EQ(result.creation.name, lvh::profiles::switch_pro().name);
+  EXPECT_EQ(result.creation.vendor_id, 0x057EU);
+  EXPECT_EQ(result.creation.product_id, 0x2009U);
   EXPECT_EQ(result.creation.physical_id, "libvirtualhid/uhid/057e:2009/12");
   EXPECT_EQ(result.creation.unique_id, "057e:2009/streaming-host-gamepad-0");
   EXPECT_TRUE(result.switch_pro.saw_subcommand_reply);
   EXPECT_TRUE(result.switch_pro.saw_motion_input);
   ASSERT_TRUE(result.switch_pro.subcommand_reply_packet_timer.has_value());
   ASSERT_TRUE(result.switch_pro.motion_input_packet_timer.has_value());
-  EXPECT_EQ(
+  EXPECT_NE(
     *result.switch_pro.motion_input_packet_timer,
-    static_cast<std::uint8_t>(*result.switch_pro.subcommand_reply_packet_timer + 1U)
+    *result.switch_pro.subcommand_reply_packet_timer
   );
   EXPECT_TRUE(result.switch_pro.saw_player_leds);
   ASSERT_EQ(result.output.callback_count, 2U);
   EXPECT_EQ(result.output.last.kind, lvh::GamepadOutputKind::player_leds);
+}
+
+TEST_F(LinuxBackendTest, SwitchProStreamsIdleAndLatestStateUntilClosed) {
+  const auto result = lvh::detail::test::linux_switch_pro_uhid_socketpair_reports();
+  ASSERT_TRUE(result.create_status.ok()) << result.create_status.message();
+  ASSERT_TRUE(result.submit_status.ok()) << result.submit_status.message();
+  ASSERT_TRUE(result.switch_pro.clear_status.ok()) << result.switch_pro.clear_status.message();
+  EXPECT_TRUE(result.close_status.ok()) << result.close_status.message();
+
+  for (const auto &reports : {
+         result.switch_pro.idle_input_reports,
+         result.switch_pro.repeated_input_reports,
+         result.switch_pro.cleared_input_reports,
+       }) {
+    ASSERT_EQ(reports.size(), 2U);
+    EXPECT_EQ(reports[0].size(), lvh::profiles::switch_pro().input_report_size);
+    EXPECT_EQ(reports[0][0], 0x30U);
+    EXPECT_NE(reports[0][1], reports[1][1]);
+    EXPECT_TRUE(std::equal(reports[0].begin() + 2, reports[0].end(), reports[1].begin() + 2));
+  }
+  EXPECT_TRUE(result.saw_destroy);
+  EXPECT_TRUE(result.switch_pro.stopped_after_destroy);
 }
 
 TEST_F(LinuxBackendTest, SocketpairBackedDualSenseRepliesToFeatureReports) {
@@ -1322,10 +1377,20 @@ TEST_F(LinuxBackendTest, FakeUinputConstructionCoversCapabilitiesAndFailureBranc
   const auto absolute_mouse = lvh::detail::test::linux_uinput_create_fake_absolute_mouse_device();
   ASSERT_TRUE(absolute_mouse.status.ok()) << absolute_mouse.status.message();
   EXPECT_TRUE(has_type(absolute_mouse, EV_KEY));
-  EXPECT_FALSE(has_type(absolute_mouse, EV_REL));
+  EXPECT_TRUE(has_type(absolute_mouse, EV_REL));
   EXPECT_TRUE(has_type(absolute_mouse, EV_ABS));
   EXPECT_TRUE(has_property(absolute_mouse, INPUT_PROP_DIRECT));
   EXPECT_NE(find_code(absolute_mouse, EV_KEY, BTN_LEFT), nullptr);
+  EXPECT_EQ(find_code(absolute_mouse, EV_REL, REL_X), nullptr);
+  EXPECT_EQ(find_code(absolute_mouse, EV_REL, REL_Y), nullptr);
+  EXPECT_NE(find_code(absolute_mouse, EV_REL, REL_WHEEL), nullptr);
+  EXPECT_NE(find_code(absolute_mouse, EV_REL, REL_HWHEEL), nullptr);
+#if defined(REL_WHEEL_HI_RES)
+  EXPECT_NE(find_code(absolute_mouse, EV_REL, REL_WHEEL_HI_RES), nullptr);
+#endif
+#if defined(REL_HWHEEL_HI_RES)
+  EXPECT_NE(find_code(absolute_mouse, EV_REL, REL_HWHEEL_HI_RES), nullptr);
+#endif
   const auto *mouse_x = find_code(absolute_mouse, EV_ABS, ABS_X);
   ASSERT_NE(mouse_x, nullptr);
   EXPECT_TRUE(mouse_x->has_absinfo);
