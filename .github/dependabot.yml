@@ -1,26 +1,10 @@
 ---
-# This file is centrally managed in https://github.com/<organization>/.github/
-# Don't make changes to this file in this repo as they will be overwritten with changes made to the same file in
-# the above-mentioned repo.
-
-# All dependendencies, except git submodules, in this project are now managed by Renovate.
-# See https://github.com/LizardByte/.github/blob/master/renovate-config.json5 for configuration.
+# 本 fork 与上游 LizardByte/Sunshine 的差别之一：
+# 上游的子模块在本仓库是「按上游指定提交原样收录」的目录（不是 git submodule），
+# 所以 Dependabot 的 gitsubmodule 生态在这里没有作用（它只会开一堆无效 PR）。
+# 收录内容的更新由 ci/vendor-submodules.sh 随上游同步一起做。
+#
+# 其余依赖由上游的 Renovate 配置管理，本文件与上游保持一致的部分见 git 历史。
 
 version: 2
-updates:
-  - package-ecosystem: "gitsubmodule"
-    cooldown:
-      exclude:
-        - "*"
-    directory: "/"
-    rebase-strategy: disabled
-    schedule:
-      interval: "cron"
-      cronjob: "30 2 * * *"
-      timezone: "America/New_York"
-    groups:
-      vulkan:
-        patterns:
-          - "third-party/Vulkan-*"
-          - "third-party/*/Vulkan-*"
-    open-pull-requests-limit: 10
+updates: []
