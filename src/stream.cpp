@@ -2254,9 +2254,9 @@ namespace stream {
       if (--running_sessions == 0) {
         bool revert_display_config {config::video.dd.config_revert_on_disconnect};
 #ifdef __linux__
-        // Hand desktop input method ownership back to the session when the last
-        // client leaves. Bare Desktop sessions never reach proc::terminate(), so
-        // the disconnect hook there alone would leave the takeover record behind.
+        // Release the input method bridge when the last client leaves. Bare
+        // Desktop sessions never reach proc::terminate(), so the disconnect
+        // hook there alone would keep the session record alive.
         input_method::disconnect();
 #endif
         if (proc::proc.running()) {

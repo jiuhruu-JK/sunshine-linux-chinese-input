@@ -822,52 +822,6 @@ namespace platf {
   /**
    * @brief Platform audio controller that manages sinks and microphone capture.
    */
-  /**
-   * @brief Scoped guard that keeps the display awake while held.
-   *
-   * Destroying the guard releases the platform power assertion. A guard is
-   * always safe to destroy, even when creation failed or the platform is not
-   * supported.
-   */
-  class display_awake_guard_t {
-  public:
-    virtual ~display_awake_guard_t() = default;
-  };
-
-  /**
-   * @brief Platform display power control.
-   *
-   * Streaming hosts must prevent the desktop session from blanking the
-   * displays while a client is connected: a blanked display turns into a
-   * black stream for the remote user and, on Wayland/KMS hosts, can lock the
-   * whole session away from them. Implementations use the platform's standard
-   * power-management interfaces and never change display topology.
-   */
-  class display_power_t {
-  public:
-    /**
-     * @brief Wake the requested display if the platform allows it.
-     *
-     * Best-effort: platforms that cannot wake a display report false and the
-     * caller continues (capture will fail naturally if the display is off).
-     * @param display_name Platform capture selector of the display.
-     * @return True when the wake request was accepted (or already awake).
-     */
-    virtual bool wake_display(const std::string &display_name) = 0;
-
-    /**
-     * @brief Keep all displays awake until the returned guard is destroyed.
-     *
-     * @param reason Short human-readable reason for the power assertion.
-     * @return A guard owning the platform assertion, or nullptr when the
-     * platform cannot inhibit display sleep (caller must not treat this as
-     * fatal).
-     */
-    [[nodiscard]] virtual std::unique_ptr<display_awake_guard_t> keep_awake(const std::string &reason) = 0;
-
-    virtual ~display_power_t() = default;
-  };
-
   class audio_control_t {
   public:
     /**
@@ -961,14 +915,6 @@ namespace platf {
    * @return Platform audio controller, or nullptr when audio control is unavailable.
    */
   std::unique_ptr<audio_control_t> audio_control();
-
-  /**
-   * @brief Create the platform display power controller.
-   *
-   * @return Platform display power controller, or nullptr when the platform
-   * has no display power management support.
-   */
-  std::unique_ptr<display_power_t> display_power();
 
   /**
    * @brief Get the display_t instance for the given hwdevice_type.

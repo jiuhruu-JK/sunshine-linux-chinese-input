@@ -1484,13 +1484,6 @@ namespace video {
    * @param config Configuration values to apply.
    */
   void reset_display(std::shared_ptr<platf::display_t> &disp, const platf::mem_type_e &type, const std::string &display_name, const config_t &config) {
-    // Wake the display before capture setup: a display that the session
-    // manager just blanked would otherwise fail capture initialization
-    // (and on some Wayland compositors, lock the session entirely).
-    if (auto power = platf::display_power()) {
-      power->wake_display(display_name);
-    }
-
     // We try this twice, in case we still get an error on reinitialization
     for (int x = 0; x < 2; ++x) {
       disp.reset();

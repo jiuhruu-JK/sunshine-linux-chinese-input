@@ -191,9 +191,10 @@ namespace proc {
     _app_prep_it = _app_prep_begin;
 
 #ifdef __linux__
-    // Take over desktop input method ownership before the session's prep commands
-    // run, so the KWin-managed fcitx5 chain is healthy when the client starts typing.
-    // The call is failure-tolerant by design: it only logs and never aborts the launch.
+    // Announce the streaming session to the input method bridge before the
+    // session's prep commands run, so the text path is known to be in use
+    // while the client starts typing. The call is failure-tolerant by design:
+    // it only logs and never aborts the launch.
     input_method::connect();
 #endif
 
@@ -387,8 +388,8 @@ namespace proc {
     }
 
 #ifdef __linux__
-    // Hand desktop input method ownership back to the session after the undo
-    // commands ran. Without a takeover record this is a no-op.
+    // Release the input method bridge after the undo commands ran. The call is
+    // idempotent, so a session that never connected is a no-op.
     input_method::disconnect();
 #endif
 

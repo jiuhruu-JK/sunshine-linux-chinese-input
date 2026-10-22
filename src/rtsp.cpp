@@ -470,10 +470,6 @@ namespace rtsp_stream {
   /**
    * @brief RTSP listener that matches incoming clients to pending launch sessions.
    */
-  namespace {
-    void display_power_sessions_changed(int count);
-  }  // namespace
-
   class rtsp_server_t {
   public:
     ~rtsp_server_t() {
@@ -657,27 +653,19 @@ namespace rtsp_stream {
      * @examples_end
      */
     void clear(bool all = true) {
-      int count_after = 0;
-      {
-        auto lg = _session_slots.lock();
+      auto lg = _session_slots.lock();
 
-        for (auto i = _session_slots->begin(); i != _session_slots->end();) {
-          auto &slot = *(*i);
-          if (all || stream::session::state(slot) == stream::session::state_e::STOPPING) {
-            stream::session::stop(slot);
-            stream::session::join(slot);
+      for (auto i = _session_slots->begin(); i != _session_slots->end();) {
+        auto &slot = *(*i);
+        if (all || stream::session::state(slot) == stream::session::state_e::STOPPING) {
+          stream::session::stop(slot);
+          stream::session::join(slot);
 
-            i = _session_slots->erase(i);
-          } else {
-            i++;
-          }
+          i = _session_slots->erase(i);
+        } else {
+          i++;
         }
-        count_after = (int) _session_slots->size();
       }
-      // 必须在锁外触发：display_power_sessions_changed 内部会重新进入
-      // session_count()/clear()，锁内触发会造成非递归锁自死锁，
-      // 冻结调用线程（如 nvhttp 的单线程 io_context）。
-      display_power_sessions_changed(count_after);
     }
 
     /**
@@ -686,37 +674,26 @@ namespace rtsp_stream {
      * @param cert Certificate data or object used by the operation.
      */
     void clear_by_cert(std::string_view cert) {
-      int count_after = 0;
-      {
-        auto lg = _session_slots.lock();
-        for (auto i = _session_slots->begin(); i != _session_slots->end();) {
-          auto &slot = *(*i);
-          if (stream::session::client_cert(slot) == cert) {
-            stream::session::stop(slot);
-            stream::session::join(slot);
-            i = _session_slots->erase(i);
-          } else {
-            i++;
-          }
+      auto lg = _session_slots.lock();
+      for (auto i = _session_slots->begin(); i != _session_slots->end();) {
+        auto &slot = *(*i);
+        if (stream::session::client_cert(slot) == cert) {
+          stream::session::stop(slot);
+          stream::session::join(slot);
+          i = _session_slots->erase(i);
+        } else {
+          i++;
         }
-        count_after = (int) _session_slots->size();
       }
-      display_power_sessions_changed(count_after);
     }
 
     /**
-     * @brief Clear by cert state.
-     *
-     * @param cert Certificate data or object used by the operation.
+     * @brief Removes the provided session from the set of sessions.
+     * @param session The session to remove.
      */
     void remove(const std::shared_ptr<stream::session_t> &session) {
-      int count_after = 0;
-      {
-        auto lg = _session_slots.lock();
-        _session_slots->erase(session);
-        count_after = (int) _session_slots->size();
-      }
-      display_power_sessions_changed(count_after);
+      auto lg = _session_slots.lock();
+      _session_slots->erase(session);
     }
 
     /**
@@ -724,14 +701,9 @@ namespace rtsp_stream {
      * @param session The session to insert.
      */
     void insert(const std::shared_ptr<stream::session_t> &session) {
-      int count_after = 0;
-      {
-        auto lg = _session_slots.lock();
-        _session_slots->emplace(session);
-        count_after = (int) _session_slots->size();
-        BOOST_LOG(info) << "New streaming session started [active sessions: "sv << count_after << ']';
-      }
-      display_power_sessions_changed(count_after);
+      auto lg = _session_slots.lock();
+      _session_slots->emplace(session);
+      BOOST_LOG(info) << "New streaming session started [active sessions: "sv << _session_slots->size() << ']';
     }
 
     /**
@@ -767,50 +739,6 @@ namespace rtsp_stream {
 
     std::shared_ptr<socket_t> next_socket;
   };
-
-  namespace {
-    /**
-     * @brief Display-awake guard state shared by all streaming sessions.
-     *
-     * While at least one RTSP session is active, the platform display power
-     * controller holds an inhibitor so the session manager cannot blank the
-     * displays (a blanked display is a black stream for the client, and on
-     * Wayland it can lock the user out entirely). The guard is released when
-     * the last session ends. The assertion is owned by this process, so it is
-     * released automatically even on abnormal shutdown.
-     */
-    struct display_power_state_t {
-      std::unique_ptr<platf::display_awake_guard_t> guard;
-    };
-
-    display_power_state_t display_power_state;
-
-    /**
-     * @brief Refresh the display-awake guard after session set changes.
-     *
-     * @param count Current active session count. Callers must pass the value
-     *        taken while they held the session lock; this function must never
-     *        re-enter session_count() (which calls clear() and would deadlock
-     *        on the non-recursive session mutex).
-     */
-    void display_power_sessions_changed(int count) {
-      auto &slot_guard = display_power_state.guard;
-      if (count > 0 && !slot_guard) {
-        auto power = platf::display_power();
-        if (power) {
-          slot_guard = power->keep_awake("Sunshine streaming session");
-          if (slot_guard) {
-            BOOST_LOG(info) << "Display sleep inhibited for streaming session"sv;
-          } else {
-            BOOST_LOG(warning) << "Streaming session active but display sleep could not be inhibited"sv;
-          }
-        }
-      } else if (count == 0 && slot_guard) {
-        slot_guard.reset();
-        BOOST_LOG(info) << "Display sleep inhibition released"sv;
-      }
-    }
-  }  // namespace
 
   rtsp_server_t server {};  ///< Singleton RTSP server used by GameStream launch sessions.
 

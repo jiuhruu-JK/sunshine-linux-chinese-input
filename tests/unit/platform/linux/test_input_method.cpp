@@ -1,12 +1,11 @@
 /**
  * @file tests/unit/platform/linux/test_input_method.cpp
- * @brief Tests for the Linux input-method ownership bridge.
+ * @brief Tests for the Linux input method bridge.
  *
- * Only the side-effect-free helpers and the no-op paths are tested here: the
- * /proc scan, the D-Bus switch writes and the real socket wait touch the live
- * desktop session and are covered by the VM acceptance matrix instead. The
- * restore path is deliberately not tested on arbitrary machines — it writes the
- * user's KWin VirtualKeyboard switch over the session bus.
+ * The bridge talks to the fcitx5 extension over a Unix domain socket, so the
+ * tests drive a stub server that speaks the same 4 byte length prefixed
+ * protocol. Nothing here touches the live desktop session: the bridge never
+ * starts, stops or reconfigures fcitx5, and the tests assert exactly that.
  */
 
 #ifdef __linux__
@@ -15,12 +14,22 @@
 #include "../../../tests_common.h"
 
 // standard includes
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
+
+// platform includes
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 // local includes
 #include "src/platform/linux/input_method.h"
@@ -71,9 +80,9 @@ namespace {
   };
 
   /**
-   * @brief Fixture providing a private runtime directory for state file tests.
+   * @brief Fixture providing a private runtime directory for socket tests.
    */
-  class InputMethodStateTest: public ProcessEnvironment {
+  class InputMethodSocketTest: public ProcessEnvironment {
   protected:
     void SetUp() override {
       ProcessEnvironment::SetUp();
@@ -82,159 +91,139 @@ namespace {
       fs::remove_all(test_dir);
       fs::create_directories(test_dir);
       setenv("XDG_RUNTIME_DIR", test_dir.string().c_str(), 1);
-      im::reset_takeover_state_for_testing();
+      im::reset_session_state_for_testing();
     }
 
     void TearDown() override {
-      im::reset_takeover_state_for_testing();
+      im::reset_session_state_for_testing();
       fs::remove_all(test_dir);
       runtime_guard_.reset();
       ProcessEnvironment::TearDown();
     }
 
     /**
-     * @brief Path of a state file inside the private runtime directory.
+     * @brief Path of the extension socket inside the private runtime directory.
      */
-    fs::path state_file() const {
-      return test_dir / "sunshine-input-takeover.state";
+    fs::path socket_file() const {
+      return test_dir / "sunshine-input" / "sunshine-input.sock";
     }
 
     std::optional<environment_guard_t> runtime_guard_;  ///< Restores XDG_RUNTIME_DIR.
     fs::path test_dir;  ///< Private runtime directory for the test.
   };
+
+  /**
+   * @brief Stub extension server that accepts one frame and answers with a byte.
+   */
+  class stub_extension_t {
+  public:
+    /**
+     * @brief Start the stub server on a socket path.
+     *
+     * @param path Socket file the stub listens on.
+     * @param reply Byte sent back to the client.
+     */
+    explicit stub_extension_t(const fs::path &path, char reply):
+        reply_ {reply} {
+      fs::create_directories(path.parent_path());
+      listen_fd_ = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+      EXPECT_GE(listen_fd_, 0);
+      if (listen_fd_ < 0) {
+        return;
+      }
+
+      sockaddr_un address {};
+      address.sun_family = AF_UNIX;
+      const auto text = path.string();
+      EXPECT_LT(text.size(), sizeof(address.sun_path));
+      if (text.size() >= sizeof(address.sun_path)) {
+        return;
+      }
+      std::strncpy(address.sun_path, text.c_str(), sizeof(address.sun_path) - 1);
+      EXPECT_EQ(::bind(listen_fd_, reinterpret_cast<sockaddr *>(&address), sizeof(address)), 0);
+      EXPECT_EQ(::listen(listen_fd_, 4), 0);
+
+      worker_ = std::thread {[this] { serve(); }};
+    }
+
+    ~stub_extension_t() {
+      stop_.store(true);
+      if (worker_.joinable()) {
+        worker_.join();
+      }
+      if (listen_fd_ >= 0) {
+        ::close(listen_fd_);
+      }
+    }
+
+    /**
+     * @brief The payload the stub received.
+     */
+    std::string received() {
+      if (worker_.joinable()) {
+        worker_.join();
+      }
+      return received_;
+    }
+
+  private:
+    void serve() {
+      int client = -1;
+      // The listener is non blocking so the stub can always be torn down, even
+      // when no client ever connects.
+      while (client < 0 && !stop_.load()) {
+        client = ::accept(listen_fd_, nullptr, nullptr);
+        if (client < 0) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+      }
+      if (client < 0) {
+        return;
+      }
+
+      // The client socket is blocking; a receive timeout keeps the stub
+      // tearable down even when a client connects without sending anything.
+      const timeval timeout {2, 0};
+      ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+      unsigned char header[4] {};
+      if (::recv(client, header, sizeof(header), MSG_WAITALL) == static_cast<ssize_t>(sizeof(header))) {
+        const auto length = (static_cast<std::uint32_t>(header[0]) << 24) |
+                            (static_cast<std::uint32_t>(header[1]) << 16) |
+                            (static_cast<std::uint32_t>(header[2]) << 8) |
+                            static_cast<std::uint32_t>(header[3]);
+        std::string payload(length, '\0');
+        if (length > 0 && ::recv(client, payload.data(), length, MSG_WAITALL) == static_cast<ssize_t>(length)) {
+          received_ = payload;
+        }
+      }
+      const char answer = reply_;
+      ::send(client, &answer, 1, MSG_NOSIGNAL);
+      ::close(client);
+    }
+
+    char reply_;  ///< Byte sent back to the client.
+    int listen_fd_ = -1;  ///< Listening socket.
+    std::atomic<bool> stop_ {false};  ///< Set when the stub is torn down.
+    std::thread worker_;  ///< Thread serving one client.
+    std::string received_;  ///< Payload the stub received.
+  };
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// KWin托管判据 (AC4 / shift-10 lesson)
-// ---------------------------------------------------------------------------
-
-TEST(InputMethodKwinCriterion, KwinChildDetection_MatchesKwinWaylandParent) {
-  const std::string cmdline("kwin_wayland\0--socket\0wayland-0\0", 30);
-  EXPECT_TRUE(imd::cmdline_indicates_kwin_wayland(cmdline));
+TEST_F(InputMethodSocketTest, SocketPaths_FollowRuntimeDir) {
+  EXPECT_EQ(imd::socket_path(), socket_file());
+  EXPECT_EQ(imd::runtime_dir(), test_dir);
 }
 
-TEST(InputMethodKwinCriterion, KwinChildDetection_RejectsNonKwinParent) {
-  const std::string cmdline("plasmashell\0", 12);
-  EXPECT_FALSE(imd::cmdline_indicates_kwin_wayland(cmdline));
-  EXPECT_FALSE(imd::cmdline_indicates_kwin_wayland("fcitx5"));
-  EXPECT_FALSE(imd::cmdline_indicates_kwin_wayland(""));
+TEST_F(InputMethodSocketTest, SocketPaths_FallBackToTmpWithoutRuntimeDir) {
+  unsetenv("XDG_RUNTIME_DIR");
+  EXPECT_EQ(imd::runtime_dir(), fs::path {"/tmp"});
+  EXPECT_EQ(imd::socket_dir(), fs::path {"/tmp"} / ("sunshine-input-"s + std::to_string(getuid())));
+  EXPECT_EQ(imd::socket_path(), imd::socket_dir() / "sunshine-input.sock");
 }
 
-TEST(InputMethodKwinCriterion, KwinChildDetection_MissingProcessIsFalse) {
-  // pid 0 is never present in /proc; a vanished process must never count as hosted.
-  EXPECT_FALSE(imd::is_kwin_child(0));
-  EXPECT_FALSE(imd::is_kwin_child(4194303));
-}
-
-TEST_F(ProcessEnvironment, KwinChildDetection_RejectsWaylandSocketEnv) {
-  // Regression for the 2026-10-14 night shift (progress.md, shift 10): the broken
-  // criterion read WAYLAND_SOCKET, which the Wayland module consumes and clears,
-  // so even a genuine KWin child tested as "not hosted". Every fcitx5 start then
-  // cycled the switch, KWin killed its own instance, re-spawned it, forever.
-  environment_guard_t wayland_socket_guard {"WAYLAND_SOCKET"};
-  ASSERT_EQ(setenv("WAYLAND_SOCKET", "7", 1), 0);
-
-  const std::string parent_cmdline("fcitx5\0", 6);
-  EXPECT_FALSE(imd::cmdline_indicates_kwin_wayland(parent_cmdline));
-  EXPECT_FALSE(imd::is_kwin_child(0));
-  // The environment is irrelevant even when a real KWin parent is present:
-  const std::string kwin_cmdline("kwin_wayland\0--socket\0", 21);
-  EXPECT_TRUE(imd::cmdline_indicates_kwin_wayland(kwin_cmdline));
-}
-
-// ---------------------------------------------------------------------------
-// /proc parsing helpers
-// ---------------------------------------------------------------------------
-
-TEST(InputMethodProcess, ParsePpid_SimpleComm) {
-  EXPECT_EQ(imd::parse_ppid("99 (systemd) S 1 99 1").value_or(0), 1u);
-}
-
-TEST(InputMethodProcess, ParsePpid_CommWithSpacesAndParens) {
-  // comm may contain spaces and parentheses; parsing must start after the last ')'.
-  const auto stat = "1234 (fcitx5 (weird) name) S 5678 1234 1234 0 -1 4194560"sv;
-  EXPECT_EQ(imd::parse_ppid(stat).value_or(-1), 5678);
-}
-
-TEST(InputMethodProcess, ParsePpid_NoParensReturnsNullopt) {
-  EXPECT_FALSE(imd::parse_ppid("no parens here").has_value());
-  EXPECT_FALSE(imd::parse_ppid("1234 (fcitx5) S").has_value());
-}
-
-TEST(InputMethodProcess, CmdlineIsFcitx5_MatchesBareName) {
-  const std::string argv("fcitx5\0--replace\0", 18);
-  EXPECT_TRUE(imd::cmdline_is_fcitx5(argv));
-}
-
-TEST(InputMethodProcess, CmdlineIsFcitx5_MatchesAbsolutePath) {
-  const std::string argv("/usr/bin/fcitx5\0", 17);
-  EXPECT_TRUE(imd::cmdline_is_fcitx5(argv));
-}
-
-TEST(InputMethodProcess, CmdlineIsFcitx5_RejectsUnrelated) {
-  const std::string argv("bash\0-l\0", 8);
-  EXPECT_FALSE(imd::cmdline_is_fcitx5(argv));
-}
-
-TEST(InputMethodProcess, CmdlineIsFcitx5_NoSubstringFalsePositive) {
-  // "notfcitx5x" contains "fcitx5" but not as a whole argv element.
-  const std::string argv("notfcitx5x\0", 11);
-  EXPECT_FALSE(imd::cmdline_is_fcitx5(argv));
-  const std::string argv2("editor\0help/fcitx5x.txt\0", 23);
-  EXPECT_FALSE(imd::cmdline_is_fcitx5(argv2));
-}
-
-// ---------------------------------------------------------------------------
-// 状态存取
-// ---------------------------------------------------------------------------
-
-TEST_F(InputMethodStateTest, StateRoundTrip_SaveLoadClear) {
-  for (bool original : {true, false}) {
-    ASSERT_TRUE(imd::save_takeover_state(state_file(), original));
-    ASSERT_EQ(imd::load_takeover_state(state_file()).value_or(!original), original);
-  }
-  ASSERT_TRUE(imd::clear_takeover_state(state_file()));
-  EXPECT_FALSE(imd::load_takeover_state(state_file()).has_value());
-  // A missing file is always a successful clear (idempotent disconnect).
-  EXPECT_TRUE(imd::clear_takeover_state(state_file()));
-}
-
-TEST_F(InputMethodStateTest, StateFormat_ParsesWhatSaveWrote) {
-  for (bool original : {true, false}) {
-    ASSERT_EQ(imd::parse_state(imd::format_state(original)).value_or(!original), original);
-  }
-}
-
-TEST(InputMethodState, ParseState_TrimsWhitespace) {
-  EXPECT_EQ(imd::parse_state("enabled=true\n").value_or(false), true);
-  EXPECT_EQ(imd::parse_state("enabled=false\r\n").value_or(true), false);
-  EXPECT_EQ(imd::parse_state("  enabled=true  \n").value_or(false), true);
-}
-
-TEST(InputMethodState, ParseState_GarbageReturnsNullopt) {
-  EXPECT_FALSE(imd::parse_state("garbage").has_value());
-  EXPECT_FALSE(imd::parse_state("").has_value());
-  EXPECT_FALSE(imd::parse_state("enabled=maybe").has_value());
-}
-
-TEST_F(InputMethodStateTest, StateSave_CreatesMissingDirectory) {
-  const auto nested = test_dir / "nested" / "dir" / "sunshine-input-takeover.state";
-  EXPECT_TRUE(imd::save_takeover_state(nested, true));
-  EXPECT_EQ(imd::load_takeover_state(nested).value_or(false), true);
-}
-
-// ---------------------------------------------------------------------------
-// socket 路径与等待
-// ---------------------------------------------------------------------------
-
-TEST_F(InputMethodStateTest, SocketPaths_FollowRuntimeDir) {
-  const auto socket = imd::socket_path();
-  EXPECT_EQ(socket, test_dir / "sunshine-input" / "sunshine-input.sock");
-  EXPECT_EQ(imd::state_path(), test_dir / "sunshine-input-takeover.state");
-}
-
-TEST_F(InputMethodStateTest, PluginPresent_FollowsSocketDirectory) {
-  const auto socket = imd::socket_path();
+TEST_F(InputMethodSocketTest, PluginPresent_FollowsSocketDirectory) {
+  const auto socket = socket_file();
   EXPECT_FALSE(imd::plugin_present(socket)) << "no extension installed yet";
   fs::create_directories(socket.parent_path());
   EXPECT_TRUE(imd::plugin_present(socket));
@@ -242,41 +231,92 @@ TEST_F(InputMethodStateTest, PluginPresent_FollowsSocketDirectory) {
   EXPECT_FALSE(imd::plugin_present(socket));
 }
 
-TEST(InputMethodSocket, WaitSocket_AppearsWithinTimeout) {
-  const auto path = fs::temp_directory_path() / ("sunshine-input-wait-" + std::to_string(getpid()) + ".sock");
-  fs::remove(path);
-  {
-    std::ofstream file {path};
-    file << "stub";
+TEST(InputMethodFrame, EncodeFrame_UsesBigEndianLengthPrefix) {
+  const auto frame = imd::encode_frame("中文"sv);
+  ASSERT_EQ(frame.size(), 4u + 6u);
+  EXPECT_EQ(static_cast<unsigned char>(frame[0]), 0u);
+  EXPECT_EQ(static_cast<unsigned char>(frame[1]), 0u);
+  EXPECT_EQ(static_cast<unsigned char>(frame[2]), 0u);
+  EXPECT_EQ(static_cast<unsigned char>(frame[3]), 6u);
+  EXPECT_EQ(frame.substr(4), "中文"sv);
+}
+
+TEST(InputMethodFrame, EncodeFrame_EmptyPayload) {
+  const auto frame = imd::encode_frame(""sv);
+  ASSERT_EQ(frame.size(), 4u);
+  for (const auto byte : frame) {
+    EXPECT_EQ(static_cast<unsigned char>(byte), 0u);
   }
-  EXPECT_TRUE(imd::wait_socket(path, 2000ms));
-  fs::remove(path);
 }
 
-TEST(InputMethodSocket, WaitSocket_TimeoutReturnsFalse) {
-  const auto path = fs::temp_directory_path() / ("sunshine-input-wait-missing-" + std::to_string(getpid()) + ".sock");
-  fs::remove(path);
-  EXPECT_FALSE(imd::wait_socket(path, 250ms));
+TEST(InputMethodReply, ParseReply_AcceptanceByteIsSubmitted) {
+  EXPECT_EQ(imd::parse_reply('K'), im::submit_result_e::submitted);
 }
 
-// ---------------------------------------------------------------------------
-// disconnect 空操作语义 (AC3)
-// ---------------------------------------------------------------------------
+TEST(InputMethodReply, ParseReply_RejectionByteIsRejected) {
+  EXPECT_EQ(imd::parse_reply('E'), im::submit_result_e::rejected);
+}
 
-TEST_F(InputMethodStateTest, DisconnectWithoutTakeoverIsNoop) {
-  // No takeover record anywhere: disconnect must not touch the switch, must not
-  // kill anything and must not create files. Anything else would replay a
-  // mid-session undo against a user who never streamed.
-  im::disconnect();
-  EXPECT_FALSE(fs::exists(state_file()));
-  EXPECT_FALSE(fs::exists(test_dir / "sunshine-input"));
+TEST(InputMethodReply, ParseReply_UnknownByteIsRejected) {
+  EXPECT_EQ(imd::parse_reply('?'), im::submit_result_e::rejected);
+}
 
-  // A recorded-but-missing state file behaves the same as no record.
-  EXPECT_TRUE(imd::save_takeover_state(state_file(), true));
-  EXPECT_TRUE(imd::clear_takeover_state(state_file()));
-  im::reset_takeover_state_for_testing();
+TEST_F(InputMethodSocketTest, SubmitToSocket_ExtensionAcceptsTheText) {
+  stub_extension_t stub {socket_file(), 'K'};
+  const auto result = imd::submit_to_socket(socket_file(), "中文测试"sv);
+  EXPECT_EQ(result, im::submit_result_e::submitted);
+  EXPECT_EQ(stub.received(), "中文测试"sv);
+}
+
+TEST_F(InputMethodSocketTest, SubmitToSocket_ExtensionRefusesTheText) {
+  stub_extension_t stub {socket_file(), 'E'};
+  const auto result = imd::submit_to_socket(socket_file(), "中文测试"sv);
+  EXPECT_EQ(result, im::submit_result_e::rejected);
+  EXPECT_EQ(stub.received(), "中文测试"sv);
+}
+
+TEST_F(InputMethodSocketTest, SubmitToSocket_MissingSocketIsUnavailable) {
+  // No extension listening: the caller keeps the upstream text path.
+  const auto result = imd::submit_to_socket(socket_file(), "中文"sv);
+  EXPECT_EQ(result, im::submit_result_e::unavailable);
+}
+
+TEST_F(InputMethodSocketTest, SubmitToSocket_EmptyTextIsRejected) {
+  stub_extension_t stub {socket_file(), 'K'};
+  EXPECT_EQ(imd::submit_to_socket(socket_file(), ""sv), im::submit_result_e::rejected);
+}
+
+TEST_F(InputMethodSocketTest, SubmitText_UsesTheExtensionSocket) {
+  stub_extension_t stub {socket_file(), 'K'};
+  EXPECT_EQ(im::submit_text("你好"sv), im::submit_result_e::submitted);
+  EXPECT_EQ(stub.received(), "你好"sv);
+}
+
+TEST_F(InputMethodSocketTest, SubmitText_WithoutExtensionIsUnavailable) {
+  EXPECT_EQ(im::submit_text("你好"sv), im::submit_result_e::unavailable);
+}
+
+TEST_F(InputMethodSocketTest, ConnectAndDisconnect_OnlyTrackTheSession) {
+  EXPECT_FALSE(im::health().session_active);
+  EXPECT_FALSE(im::connect()) << "no extension installed";
+  EXPECT_TRUE(im::health().session_active);
+
   im::disconnect();
-  EXPECT_FALSE(fs::exists(state_file()));
+  EXPECT_FALSE(im::health().session_active);
+}
+
+TEST_F(InputMethodSocketTest, Connect_ReportsTheExtensionWhenPresent) {
+  stub_extension_t stub {socket_file(), 'K'};
+  EXPECT_TRUE(im::connect());
+  EXPECT_TRUE(im::health().socket_present);
+  EXPECT_TRUE(im::health().is_healthy());
+}
+
+TEST_F(InputMethodSocketTest, Health_DescribesTheSnapshot) {
+  const auto description = im::health().describe();
+  EXPECT_NE(description.find("socket="), std::string::npos);
+  EXPECT_NE(description.find("session="), std::string::npos);
+  EXPECT_NE(description.find("healthy="), std::string::npos);
 }
 
 #endif  // __linux__

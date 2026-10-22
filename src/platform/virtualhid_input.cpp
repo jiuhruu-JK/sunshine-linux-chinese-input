@@ -22,6 +22,10 @@
 #include "src/config.h"
 #include "src/logging.h"
 #include "virtualhid_input.h"
+#if defined(__linux__)
+  // text input bridge: hands remote text to the local fcitx5 extension
+  #include "src/platform/linux/input_method.h"
+#endif
 
 using namespace std::literals;
 
@@ -1175,6 +1179,20 @@ namespace platf {
   }
 
   void unicode(input_t &input, const char *utf8, int size) {
+#if defined(__linux__)
+    // Remote text goes to the local fcitx5 extension, which commits it to the
+    // focused input context in one piece. The virtual keyboard path injects
+    // Ctrl+Shift+U code points, which the receiving application treats as a
+    // shortcut and turns into garbage.
+    if (utf8 && size > 0) {
+      const auto result = input_method::submit_text(std::string_view {utf8, static_cast<std::size_t>(size)});
+      if (result != input_method::submit_result_e::unavailable) {
+        // The extension owns the text now, even when it refused it: falling back
+        // would inject the very bytes the bridge replaces.
+        return;
+      }
+    }
+#endif
     virtualhid::unicode(virtualhid::get_input_context(input), utf8, size);
   }
 

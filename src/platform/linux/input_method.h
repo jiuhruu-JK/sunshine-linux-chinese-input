@@ -1,38 +1,43 @@
 /**
  * @file src/platform/linux/input_method.h
- * @brief Declarations for input method ownership during streaming sessions.
+ * @brief Declarations for the Linux input method bridge.
  */
 #pragma once
 
-// This module manages desktop input method ownership (KWin hosting + fcitx5) and
-// is wired into Linux builds only; every other platform keeps upstream behavior.
+// This module hands the text a remote client types over to the local fcitx5
+// extension, which commits it to the focused input context in one piece. It is
+// wired into Linux builds only; every other platform keeps upstream behavior.
 #if defined(__linux__)
 
 // standard includes
-#include <chrono>
-#include <cstdint>
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace input_method {
   /**
-   * @brief Snapshot of the input method chain health.
+   * @brief Outcome of a text submission to the fcitx5 extension.
+   */
+  enum class submit_result_e {
+    unavailable,  ///< The extension is not installed or not reachable.
+    submitted,    ///< The extension committed the text to the focused context.
+    rejected,     ///< The extension refused the text (e.g. no focused context).
+  };
+
+  /**
+   * @brief Snapshot of the input method bridge health.
    */
   struct health_t {
-    bool kwin_enabled {};    ///< KWin virtual keyboard (input method hosting) switch state.
-    bool managed_alive {};   ///< A KWin-managed fcitx5 instance is running.
-    bool socket_present {};  ///< The fcitx5 extension socket file exists.
+    bool socket_present {};  ///< The extension socket file exists.
+    bool session_active {};  ///< A streaming session currently owns the bridge.
 
     /**
-     * @brief Whether every element of the healthy chain is in place.
+     * @brief Whether the extension can accept text right now.
      *
-     * @return True when the switch is on, a managed fcitx5 runs and the socket exists.
+     * @return True when the extension socket is in place.
      */
     [[nodiscard]] bool is_healthy() const {
-      return kwin_enabled && managed_alive && socket_present;
+      return socket_present;
     }
 
     /**
@@ -44,59 +49,56 @@ namespace input_method {
   };
 
   /**
-   * @brief One running fcitx5 instance as observed in /proc.
-   */
-  struct process_info_t {
-    std::uint32_t pid {};   ///< Process id of the fcitx5 instance.
-    std::uint32_t ppid {};  ///< Parent process id (KWin for a managed instance).
-    std::string cmdline;    ///< Command line with NUL separators replaced by spaces.
-  };
-
-  /**
-   * @brief Take over input method ownership for a starting stream.
+   * @brief Take over the input method bridge for a starting stream.
    *
    * Call once when a streaming session begins, before the application prep
-   * commands run. The takeover converges the chain to a known healthy state —
-   * KWin-managed fcitx5 plus a live extension socket — no matter how the desktop
-   * broke it earlier (tray restart with --replace, crash, ...):
+   * commands run. The call only observes the environment: it reports whether the
+   * fcitx5 extension is reachable and remembers that a session owns the bridge.
    *
-   * - users without the fcitx5 extension socket directory are never touched;
-   * - the original KWin VirtualKeyboard.enabled value is recorded;
-   * - all fcitx5 instances are terminated (bounded wait);
-   * - the KWin switch is cycled false -> true to force re-hosting;
-   * - the socket file is awaited (bounded, seconds);
-   * - the takeover is recorded in memory and in the runtime directory.
+   * It never starts, stops or restarts fcitx5, never writes the KWin virtual
+   * keyboard switch and never blocks on the desktop session. The keyboard
+   * ownership stays exactly where the user put it; only the text path moves.
    *
-   * Failures only log a warning; nothing propagates to the caller.
-   *
-   * @return True when the extension socket was in place at the end.
+   * @return True when the extension socket was in place.
    */
   bool connect();
 
   /**
-   * @brief Hand input method ownership back to the desktop session.
+   * @brief Hand the input method bridge back to the desktop session.
    *
-   * Call once when a streaming session ends. With a takeover record the
-   * original switch value is restored and the record cleared; without a record
-   * this is a no-op — mid-session undo commands and manual replays must never
-   * touch the user's switch or kill processes. Failures only log a warning and
-   * keep the record so the restore is retried on the next call.
+   * Call once when a streaming session ends. The call only drops the session
+   * record; nothing in the desktop session is touched, so a missing or repeated
+   * call is harmless.
    */
   void disconnect();
 
   /**
-   * @brief Report the health of the input method chain.
+   * @brief Hand a piece of text to the fcitx5 extension.
    *
-   * Each field is queried independently; a field that cannot be queried logs a
-   * warning and reports false.
+   * The text is sent as one frame to the extension socket, which commits it to
+   * the focused input context as a whole. Nothing is simulated as key presses
+   * and the clipboard is not used.
    *
-   * @return Snapshot of the switch, the managed fcitx5 instance and the socket.
+   * The caller must not fall back to the virtual keyboard when the result is
+   * @ref submit_result_e::rejected: the extension is installed and refused the
+   * text, so the upstream Ctrl+Shift+U path would only inject the same broken
+   * bytes the bridge was introduced to replace.
+   *
+   * @param utf8 UTF-8 text to commit.
+   * @return Outcome of the submission.
+   */
+  [[nodiscard]] submit_result_e submit_text(std::string_view utf8);
+
+  /**
+   * @brief Report the health of the input method bridge.
+   *
+   * @return Snapshot of the extension socket and the session record.
    */
   [[nodiscard]] health_t health();
 
   namespace detail {
     /**
-     * @brief Per-user runtime directory used for the socket and the state file.
+     * @brief Per-user runtime directory used for the extension socket.
      *
      * @return XDG_RUNTIME_DIR when set, /tmp otherwise.
      */
@@ -120,14 +122,7 @@ namespace input_method {
     [[nodiscard]] std::filesystem::path socket_path();
 
     /**
-     * @brief Path of the takeover state file in the runtime directory.
-     *
-     * @return runtime_dir()/sunshine-input-takeover.state.
-     */
-    [[nodiscard]] std::filesystem::path state_path();
-
-    /**
-     * @brief Whether the fcitx5 extension plugin is present on this host.
+     * @brief Whether the fcitx5 extension is present on this host.
      *
      * Users without the extension never get the socket directory, so streaming
      * stays completely untouched for them.
@@ -138,106 +133,39 @@ namespace input_method {
     [[nodiscard]] bool plugin_present(const std::filesystem::path &socket_file);
 
     /**
-     * @brief Whether a /proc/<pid>/cmdline payload belongs to KWin's Wayland compositor.
+     * @brief Build the wire frame of a text submission.
      *
-     * KWin grants the Wayland text-input role only to processes it spawned
-     * itself, so the parent of a healthy fcitx5 instance is kwin_wayland.
-     * The WAYLAND_SOCKET environment variable must never be used as a
-     * substitute criterion: the Wayland stack consumes and clears it, and
-     * trusting it caused a respawn loop during the 2026-10-14 night shift.
+     * The frame is a 4 byte big endian length prefix followed by the UTF-8
+     * payload, which is the protocol the fcitx5 extension reads.
      *
-     * @param cmdline Contents of /proc/<ppid>/cmdline.
-     * @return True when the parent process command line mentions kwin_wayland.
+     * @param text UTF-8 payload.
+     * @return Frame bytes ready to be written to the socket.
      */
-    [[nodiscard]] bool cmdline_indicates_kwin_wayland(std::string_view cmdline);
+    [[nodiscard]] std::string encode_frame(std::string_view text);
 
     /**
-     * @brief Whether a /proc/<pid>/cmdline payload belongs to an fcitx5 process.
+     * @brief Interpret the reply byte of the extension.
      *
-     * An argument equal to "fcitx5" or ending in "/fcitx5" identifies the
-     * process, so unrelated matches (e.g. an editor showing an fcitx5 config
-     * file) never qualify.
-     *
-     * @param cmdline Contents of /proc/<pid>/cmdline.
-     * @return True when one of the arguments names fcitx5.
+     * @param reply Byte received from the extension.
+     * @return Submitted for the acceptance byte, rejected for everything else.
      */
-    [[nodiscard]] bool cmdline_is_fcitx5(std::string_view cmdline);
+    [[nodiscard]] submit_result_e parse_reply(char reply);
 
     /**
-     * @brief Whether the parent of a process is KWin's Wayland compositor.
+     * @brief Send one text frame to an extension socket and read the reply.
      *
-     * @param ppid Parent process id to inspect.
-     * @return True when /proc/<ppid>/cmdline mentions kwin_wayland; a missing process yields false.
+     * @param socket_file Path of the extension socket file.
+     * @param text UTF-8 payload.
+     * @return Outcome of the submission.
      */
-    [[nodiscard]] bool is_kwin_child(std::uint32_t ppid);
-
-    /**
-     * @brief Extract the parent process id from a /proc/<pid>/stat payload.
-     *
-     * The comm field may contain spaces and parentheses, so the parser anchors
-     * on the final ')' of the record like the reference implementation.
-     *
-     * @param stat Contents of /proc/<pid>/stat.
-     * @return Parent process id, or nullopt when the payload cannot be parsed.
-     */
-    [[nodiscard]] std::optional<std::uint32_t> parse_ppid(std::string_view stat);
-
-    /**
-     * @brief Read the takeover record from a state file.
-     *
-     * @param path State file to read.
-     * @return Recorded original switch value, or nullopt when missing or unparsable.
-     */
-    [[nodiscard]] std::optional<bool> load_takeover_state(const std::filesystem::path &path);
-
-    /**
-     * @brief Serialize a takeover record.
-     *
-     * @param original Switch value recorded before the takeover.
-     * @return One-line state file payload.
-     */
-    [[nodiscard]] std::string format_state(bool original);
-
-    /**
-     * @brief Parse a takeover record payload.
-     *
-     * @param content State file payload.
-     * @return Recorded original switch value, or nullopt when the payload is not a record.
-     */
-    [[nodiscard]] std::optional<bool> parse_state(std::string_view content);
-
-    /**
-     * @brief Write the takeover record to a state file.
-     *
-     * @param path State file to write.
-     * @param original Switch value recorded before the takeover.
-     * @return True when the file was written.
-     */
-    [[nodiscard]] bool save_takeover_state(const std::filesystem::path &path, bool original);
-
-    /**
-     * @brief Remove a takeover state file.
-     *
-     * @param path State file to remove.
-     * @return True when the file is gone afterwards (a missing file counts as success).
-     */
-    [[nodiscard]] bool clear_takeover_state(const std::filesystem::path &path);
-
-    /**
-     * @brief Wait, bounded, for the extension socket file to appear.
-     *
-     * @param path Socket file to await.
-     * @param timeout Maximum time to wait.
-     * @return True when the file exists at the end of the wait.
-     */
-    [[nodiscard]] bool wait_socket(const std::filesystem::path &path, std::chrono::milliseconds timeout);
+    [[nodiscard]] submit_result_e submit_to_socket(const std::filesystem::path &socket_file, std::string_view text);
   }  // namespace detail
 
 #ifdef SUNSHINE_TESTS
   /**
-   * @brief Drop the in-memory takeover record (strictly for unit tests).
+   * @brief Drop the session record (strictly for unit tests).
    */
-  void reset_takeover_state_for_testing();
+  void reset_session_state_for_testing();
 #endif
 }  // namespace input_method
 

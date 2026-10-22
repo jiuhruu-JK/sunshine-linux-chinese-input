@@ -126,58 +126,22 @@ namespace nvhttp {
           session->connection->socket->lowest_layer().set_option(option, ec);
 
           session->connection->set_timeout(config.timeout_request);
-
-          // Root fix for handshake-starvation: some clients (e.g. Moonlight
-          // after pairchallenge) open TLS connections but never send a client
-          // certificate. With verify_fail_if_no_peer_cert the OpenSSL handshake
-          // then blocks forever inside async_handshake; every such connection
-          // stays in the accept queue (CLOSE-WAIT, unaccepted) until the
-          // single-threaded io_service starves and the port stops serving.
-          // Bound the handshake with the same request timeout and close the
-          // socket when it expires, so connections are always reclaimed.
-          {
-            auto handshake_timer = std::make_shared<boost::asio::steady_timer>(*io_service);
-            handshake_timer->expires_after(std::chrono::seconds(config.timeout_request > 0 ? config.timeout_request : 5));
-            // Capture the session to pin the connection alive for the duration
-            // of the timer, and take a raw observing pointer to the socket.
-            // Safety: the timer callback runs either before the handshake
-            // completes (session still alive -> socket valid, close it), or
-            // after we cancelled it (no-op). The handshake handler always
-            // cancels the timer before any session teardown path.
-            auto *socket_raw = session->connection->socket.get();
-            std::weak_ptr<boost::asio::steady_timer> timer_weak {handshake_timer};
-            handshake_timer->async_wait([session, socket_raw, timer_weak](const boost::system::error_code &timer_ec) {
-              if (timer_ec == boost::asio::error::operation_aborted) {
-                return;
+          session->connection->socket->async_handshake(boost::asio::ssl::stream_base::server, [this, session](const SimpleWeb::error_code &ec) {
+            session->connection->cancel_timeout();
+            auto lock = session->connection->handler_runner->continue_lock();
+            if (!lock) {
+              return;
+            }
+            if (!ec) {
+              if (verify && !verify(session->connection->socket->native_handle())) {
+                this->write(session, on_verify_failed);
+              } else {
+                this->read(session);
               }
-              // Timer fired: the handshake did not complete in time. Close the
-              // socket to abort the stuck handshake and free the connection.
-              boost::system::error_code ignored;
-              socket_raw->lowest_layer().close(ignored);
-            });
-
-            session->connection->socket->async_handshake(boost::asio::ssl::stream_base::server, [this, session, handshake_timer, timer_weak](const SimpleWeb::error_code &ec) {
-              // Cancel the bound timer first: completed (or failed) handshakes
-              // must not have their socket closed by the expiry handler.
-              if (auto timer = timer_weak.lock()) {
-                timer->cancel();
-              }
-              session->connection->cancel_timeout();
-              auto lock = session->connection->handler_runner->continue_lock();
-              if (!lock) {
-                return;
-              }
-              if (!ec) {
-                if (verify && !verify(session->connection->socket->native_handle())) {
-                  this->write(session, on_verify_failed);
-                } else {
-                  this->read(session);
-                }
-              } else if (this->on_error) {
-                this->on_error(session->request, ec);
-              }
-            });
-          }
+            } else if (this->on_error) {
+              this->on_error(session->request, ec);
+            }
+          });
         } else if (this->on_error) {
           this->on_error(session->request, ec);
         }
