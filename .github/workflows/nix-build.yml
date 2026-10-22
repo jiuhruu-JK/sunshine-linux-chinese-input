@@ -50,4 +50,3 @@ jobs:
         with:
           name: sunshine-cn-input
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: ${{ env.SKIP_PUSH }}
