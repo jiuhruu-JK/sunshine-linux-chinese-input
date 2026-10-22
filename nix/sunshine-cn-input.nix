@@ -306,8 +306,15 @@ stdenv.mkDerivation (finalAttrs: {
     fi
   '';
 
+  # dlopen 的库（avahi 等）不会被 autoPatchelf 发现，必须显式写进 RUNPATH；
+  # 与 nixpkgs 的 sunshine 包保持一致。
   runtimeDependencies = [
     libglvnd
+  ] ++ lib.optionals stdenv.hostPlatform.isLinux [
+    avahi
+    libgbm
+    libXrandr
+    libxcb
   ];
 
   meta = {
