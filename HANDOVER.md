@@ -20,7 +20,7 @@
 | 基线 | 上游 `v2026.1018.5342`（commit `3d6e1d6`），祖先关系已接上（CI 里用 `-s ours` 接的） |
 | 上游同步 | `.github/workflows/sync-upstream.yml` 每日合并上游最新 tag；子模块自动重新收录 |
 | 边界门禁 | `ci/check-boundary.sh`，白名单之外有差异就失败 |
-| 云端编译 | `.github/workflows/nix-build.yml` → nix build + 单元测试 + 推 Cachix |
+| 云端编译 | `.github/workflows/nix-build.yml` → nix build + 单元测试 + 推 Cachix；2026-10-22 已跑通（17 个用例通过，产物可从 Cachix 拉到） |
 | Nix 包 | `sunshine-cn-input`、`fcitx5-sunshine-input`、`sunshine-cn-input-tests` |
 | 收录的第三方 | 按上游指定提交原样收录，清单见 `ci/vendored-submodules.txt` |
 
@@ -61,21 +61,25 @@ tests/unit/platform/linux/test_input_method.cpp
   `src` 必须显式传，否则会拿到 `pkgs.src`（现在是个会抛异常的占位）。
 - **`lib.getExe'` 要传 derivation，不是包名。**
 - **`cmakeFeature` 只接受字符串**，布尔选项用 `lib.cmakeBool`。
+- **`cachix-action` 必须放在构建步骤之前。** 它靠守护进程的 post-build hook
+  捕获路径；放在构建之后，守护进程启动时增量已经是空的，构建看起来成功，
+  但缓存里什么都没有。验证方法：`curl https://sunshine-cn-input.cachix.org/<hash>.narinfo`
+  返回 200。
+- **测试变体的 `$out` 不能是空的。** 收尾阶段 `autoPatchelfHook` 发现没有任何
+  输出路径会直接失败；测试结果文件写进 `$out/share/sunshine-cn-input/` 即可。
 
 ## 5. 待办
 
-1. **云端编译还没跑过。** 这套打包定义是照着 nixpkgs 的 sunshine 包改的，
-   但云端 CI 从没成功构建过。第一次跑通前，不要假设它能用。
-2. **本机零编译。** 编译只在云端 CI 跑（见仓库根目录的 `AGENTS.md`）。
-   本机要验证行为，先 `nix build` 拉云端产物。
-3. **桌面侧不用配合任何设置。** 文本桥与 KWin 的虚拟键盘开关无关；
+1. **本机零编译。** 编译只在云端 CI 跑（见仓库根目录的 `AGENTS.md`）。
+   本机要验证行为，先 `nix build` 拉云端产物（CI 已把三个包推到 Cachix）。
+2. **桌面侧不用配合任何设置。** 文本桥与 KWin 的虚拟键盘开关无关；
    本方案也不去动 fcitx5 进程与 KWin 的 VirtualKeyboard 开关。
    KDE Plasma 6 Wayland 上，社区标准做法是「虚拟键盘 = Fcitx 5」（由 KWin 拉起
    fcitx5，ArchWiki《Fcitx5》与 Fcitx 官方 wiki《Setup Fcitx 5》都这么写），
    本机走的正是这条。设成「无」的话 KWin 就不拉 fcitx5，独立跑的 fcitx5
    拿不到 Wayland socket，就没有 IM 角色，浏览器会打不出中文。
-4. **托盘的 Restart 有坑**：上游 `drop_elevated_privileges` 会把 CAP_PERMITTED
+3. **托盘的 Restart 有坑**：上游 `drop_elevated_privileges` 会把 CAP_PERMITTED
    一并清掉，重初始化之后抓屏权限永久丢失。需要重启时用
    `systemctl --user restart sunshine`。
-5. **同步上游后如果白名单文件冲突**，流水线会失败，等人工合并；
+4. **同步上游后如果白名单文件冲突**，流水线会失败，等人工合并；
    子模块升级由 `ci/vendor-submodules.sh` 自动重新收录。

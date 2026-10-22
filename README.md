@@ -46,7 +46,7 @@ sunshine-linux-chinese-input/     ← 标准 fork 布局：上游源码树就在
 ## 版本
 
 - 基于 [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine)
-  的 `d1fc311`（2026-10-11，master 分支），版本号记在 [`upstream-version`](upstream-version)
+  的 `v2026.1018.5342`（commit `3d6e1d6`），版本号记在 [`upstream-version`](upstream-version)
 - 上游的子模块按上游指定提交**原样收录**进仓库（不保留 git submodule 结构），
   克隆下来就能直接构建；收录清单见 `ci/vendored-submodules.txt`
 - 每日同步上游最新 tag：子模块自动重新收录，源码差异必须通过边界门禁
